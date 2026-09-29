@@ -137,7 +137,8 @@
                         </div>
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-1">เบอร์โทรศัพท์ <span class="text-red-500">*</span></label>
-                            <input type="tel" id="customerPhone" required class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="08xxxxxxxx">
+                            <input type="tel" id="customerPhone" required inputmode="numeric" pattern="[0-9]{10}" minlength="10" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="08xxxxxxxx">
+                            <p class="text-xs text-gray-400 mt-1">กรอกตัวเลข 10 หลัก (ห้ามเกินหรือขาด)</p>
                         </div>
                     </div>
 
@@ -180,8 +181,11 @@
                     </button>
                 </form>
 
-                <div class="mt-6 pt-4 border-t border-gray-100 text-center">
-                    <p class="text-sm text-gray-500 mb-2">สั่งของไปแล้วใช่ไหม?</p>
+                <div class="mt-4 pt-4 border-t border-gray-100">
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3 text-center">
+                        <p class="text-sm font-bold text-yellow-700"><i class="fa-solid fa-triangle-exclamation mr-1"></i> กรุณาชำระเงินก่อนส่งของ</p>
+                        <p class="text-xs text-yellow-600 mt-0.5">โอนเงินตามยอดที่แจ้ง แล้วส่งสลิปในระบบด้วยนะคะ</p>
+                    </div>
                     <button onclick="openTrackModal()" class="text-green-600 font-bold hover:text-green-700 hover:underline flex items-center justify-center gap-2 w-full">
                         <i class="fa-solid fa-magnifying-glass"></i> ตรวจสอบสถานะ / ดูรูปภาพตอนส่งของ
                     </button>
@@ -343,6 +347,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20"></script>
+    <script src="script.js?v=21"></script>
 </body>
 </html>
