@@ -3,7 +3,7 @@
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzLk2fmojtjc8upkQmYp-d7tbgaQVJw1moBGSpLWYiYd-MQ18WI-c8zYfRc4qI45vVQ/exec';
 
 let cart = [];
-const MAX_ITEMS = 5; // จำกัดรายการฝากซื้อ 5 รายการ (แถว)
+const MAX_ITEMS = 7; // จำกัดรายการฝากซื้อ 7 รายการ (แถว)
 
 // DOM Elements
 const itemForm = document.getElementById('itemForm');
