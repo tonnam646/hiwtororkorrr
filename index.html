@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>hiwtororkorrr</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Add FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #10b981;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+    <!-- Navbar -->
+    <nav class="bg-green-600 text-white p-4 sticky top-0 z-50 shadow-lg bg-gradient-to-r from-green-600 to-green-500">
+        <div class="container mx-auto flex justify-between items-center max-w-5xl">
+            <h1 class="text-2xl font-extrabold tracking-tight flex items-center">
+                <img src="hiwtororkorrr.png" alt="Logo" class="h-16 w-16 object-cover mr-3 rounded-full bg-white border-2 border-white shadow-md">
+                hiwtororkorrr
+            </h1>
+            <div class="flex items-center space-x-4">
+                <a href="admin.html" class="bg-white text-green-600 px-3 py-1 rounded-full text-sm font-bold shadow hover:bg-green-50 transition">
+                    <i class="fa-solid fa-clipboard-list mr-1"></i> สำหรับผู้ดูแล
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Shop Closed Alert (Hidden by default) -->
+    <div class="container mx-auto px-4 pt-6 max-w-5xl">
+        <div id="shopClosedAlert" class="hidden w-full bg-red-100 border border-red-300 text-red-700 p-4 rounded-xl shadow-sm text-center">
+            <p class="font-bold text-lg"><i class="fa-solid fa-store-slash mr-2"></i> ขณะนี้ร้านปิดให้บริการชั่วคราว</p>
+            <p class="text-sm mt-1">ขออภัยค่ะ ขณะนี้แอดมินปิดรับออเดอร์ชั่วคราว คุณสามารถตรวจสอบสถานะออเดอร์เดิมได้ตามปกติค่ะ</p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto p-4 flex flex-col md:flex-row gap-6 mt-2 max-w-5xl items-stretch">
+
+        <!-- Request Form Section -->
+        <div class="w-full md:w-1/2">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col">
+                <div class="flex items-center mb-4 border-b pb-3">
+                    <div class="bg-green-100 text-green-600 p-2 rounded-lg mr-3">
+                        <i class="fa-solid fa-cart-plus text-xl"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800">อยากได้อะไร พิมพ์มาเลย!</h2>
+                        <p class="text-gray-500 text-sm">รับฝากซื้อทุกอย่าง ของหายาก ของแปลก ใส่รูปมาได้</p>
+                    </div>
+                </div>
+                
+                <form id="itemForm" class="space-y-5 flex-1 flex flex-col">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">ชื่อสิ่งของ / รายละเอียด <span class="text-red-500">*</span></label>
+                        <textarea id="itemName" required rows="3" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition" placeholder="เช่น ข้าวมันไก่ป้าแต๋ว (ไม่เอาหนัง), ไข่ไก่เบอร์ 2, หมูสามชั้น"></textarea>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">ปริมาณ / จำนวน <span class="text-red-500">*</span></label>
+                            <input type="number" id="itemQty" value="1" min="0.1" step="0.1" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">หน่วย <span class="text-red-500">*</span></label>
+                            <select id="itemUnit" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition">
+                                <option value="ชิ้น">ชิ้น</option>
+                                <option value="กิโลกรัม">กิโลกรัม (กก.)</option>
+                                <option value="ขีด">ขีด</option>
+                                <option value="ฟอง">ฟอง</option>
+                                <option value="แพ็ค">แพ็ค</option>
+                                <option value="กล่อง">กล่อง</option>
+                                <option value="ถุง">ถุง</option>
+                                <option value="ขวด">ขวด</option>
+                                <option value="แก้ว">แก้ว</option>
+                                <option value="อื่นๆ">อื่นๆ (ระบุในชื่อ)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex-1">
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">แนบรูปภาพ (ถ้ามี)</label>
+                        <div class="relative border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('itemImage').click()">
+                            <i class="fa-solid fa-cloud-arrow-up text-3xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-500">คลิกเพื่ออัปโหลดรูปภาพ</p>
+                            <input type="file" id="itemImage" accept="image/*" class="hidden">
+                        </div>
+                        <div id="imagePreview" class="mt-3 hidden relative inline-block">
+                            <img src="" alt="Preview" class="h-32 object-cover rounded-xl border border-gray-200 shadow-sm">
+                            <button type="button" onclick="removeImage(event)" class="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow hover:bg-red-600">
+                                <i class="fa-solid fa-times text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition shadow-md flex justify-center items-center gap-2 mt-auto">
+                        <i class="fa-solid fa-plus"></i> เพิ่มลงรายการสั่งซื้อ
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Cart Section -->
+        <div class="w-full md:w-1/2">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col">
+                <div class="flex items-center justify-between mb-4 border-b pb-3">
+                    <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-basket-shopping text-green-500 mr-2"></i>รายการที่ฝากซื้อ</h2>
+                    <span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold"><span id="totalItemsCount">0</span>/5 รายการ</span>
+                </div>
+                
+                <div id="cartItems" class="mb-5 max-h-64 overflow-y-auto space-y-3 pr-2">
+                    <div class="flex flex-col items-center justify-center py-8 text-gray-400">
+                        <i class="fa-solid fa-box-open text-4xl mb-3 text-gray-300"></i>
+                        <p>ยังไม่มีรายการฝากซื้อ</p>
+                    </div>
+                </div>
+
+                <form id="checkoutForm" class="space-y-4 pt-4 border-t border-gray-100 mt-auto">
+                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-truck-fast mr-2"></i>ข้อมูลการจัดส่ง</h3>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">ชื่อผู้สั่ง <span class="text-red-500">*</span></label>
+                            <input type="text" id="customerName" required class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="ชื่อของคุณ">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">เบอร์โทรศัพท์ <span class="text-red-500">*</span></label>
+                            <input type="tel" id="customerPhone" required class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="08xxxxxxxx">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-1">
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">โซนจัดส่ง <span class="text-red-500">*</span></label>
+                            <select id="zoneSelect" required class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm">
+                                <option value="" disabled selected>เลือกโซน</option>
+                                <option value="โซน RNP">โซน RNP (ฉลองกรุง 1)</option>
+                                <option value="โซน FBT">โซน FBT</option>
+                                <option value="โซนเกกีงาม 1">โซนเกกีงาม 1</option>
+                                <option value="โซนเกกีงาม 2">โซนเกกีงาม 2</option>
+                                <option value="โซนเกกีงาม 3">โซนเกกีงาม 3</option>
+                                <option value="โซนจินดา">โซนจินดา</option>
+                                <option value="หอในพระจอม">หอในสถาบัน / พระจอม</option>
+                                <option value="โซน U-Place / College Town">โซน U-Place / College Town</option>
+                                <option value="ในสถาบัน (ตึกเรียน)">ในสถาบัน (ตึกเรียน)</option>
+                                <option value="โซนอื่นๆ">โซนอื่นๆ</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">ชื่อหอพัก / จุดสังเกต <span class="text-red-500">*</span></label>
+                            <input type="text" id="dormName" required class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="เช่น หอ A, หน้าเซเว่น, ใต้ตึก 12 ชั้น">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">ตำแหน่งที่อยู่ (GPS) <span class="text-red-500">*</span></label>
+                        <div class="flex gap-2">
+                            <button type="button" id="pinBtn" onclick="getLocation()" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2.5 rounded-lg font-medium transition flex items-center gap-2 whitespace-nowrap">
+                                <i class="fa-solid fa-location-crosshairs"></i> ปักหมุด
+                            </button>
+                            <input type="text" id="locationLink" required readonly class="w-full p-2.5 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-600 cursor-not-allowed" placeholder="กดปุ่มปักหมุดเพื่อดึงตำแหน่ง">
+                        </div>
+                        <p id="locationStatus" class="text-xs mt-1 text-gray-500"></p>
+                    </div>
+                    
+                    <button type="submit" id="submitBtn" class="w-full bg-gray-900 text-white font-bold py-3.5 px-4 rounded-xl hover:bg-black transition shadow-lg disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed disabled:shadow-none flex justify-center items-center gap-2 mt-4">
+                        <i class="fa-solid fa-paper-plane"></i> ส่งออเดอร์ให้คนรับฝากซื้อ
+                    </button>
+                </form>
+
+                <div class="mt-6 pt-4 border-t border-gray-100 text-center">
+                    <p class="text-sm text-gray-500 mb-2">สั่งของไปแล้วใช่ไหม?</p>
+                    <button onclick="openTrackModal()" class="text-green-600 font-bold hover:text-green-700 hover:underline flex items-center justify-center gap-2 w-full">
+                        <i class="fa-solid fa-magnifying-glass"></i> ตรวจสอบสถานะ / ดูรูปภาพตอนส่งของ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Live Status Section -->
+    <div class="container mx-auto p-4 max-w-5xl mb-12">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <div class="flex justify-between items-center mb-2 pb-2">
+                <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-list-check text-green-500 mr-2"></i>สถานะออเดอร์ล่าสุด (Live)</h2>
+                <button onclick="fetchLiveStatus()" class="text-sm text-green-600 hover:underline font-semibold"><i class="fa-solid fa-rotate-right mr-1"></i> อัปเดต</button>
+            </div>
+            
+            <div class="flex border-b border-gray-100 mb-4">
+                <button onclick="switchLiveTab('active')" id="liveTabActive" class="py-2 px-4 text-sm font-bold border-b-2 border-green-500 text-green-600 focus:outline-none transition-colors">กำลังดำเนินการ</button>
+                <button onclick="switchLiveTab('history')" id="liveTabHistory" class="py-2 px-4 text-sm font-bold border-b-2 border-transparent text-gray-400 hover:text-gray-600 focus:outline-none transition-colors">ส่งเสร็จสิ้น</button>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50 text-gray-500 text-sm">
+                            <th class="p-3 font-bold rounded-tl-xl border-b border-gray-100">รหัสออเดอร์</th>
+                            <th class="p-3 font-bold border-b border-gray-100">ชื่อลูกค้า</th>
+                            <th class="p-3 font-bold border-b border-gray-100 text-center">ยอดโอน (฿)</th>
+                            <th class="p-3 font-bold rounded-tr-xl border-b border-gray-100">สถานะล่าสุด</th>
+                        </tr>
+                    </thead>
+                    <tbody id="liveStatusBody" class="text-sm divide-y divide-gray-100">
+                        <tr>
+                            <td colspan="4" class="text-center p-6 text-gray-400">กำลังดึงข้อมูล...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Track Order Modal -->
+    <div id="trackModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 backdrop-blur-sm transition-opacity">
+        <div class="bg-white p-6 rounded-2xl shadow-2xl max-w-md w-full mx-4 relative max-h-[90vh] overflow-y-auto">
+            <button onclick="closeTrackModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            <h3 class="text-xl font-bold text-gray-900 mb-2"><i class="fa-solid fa-magnifying-glass text-green-500 mr-2"></i>ติดตามสถานะออเดอร์</h3>
+            <p class="text-gray-500 text-sm mb-4">กรอกรหัสออเดอร์ของคุณ (เช่น ORD123...)</p>
+            
+            <form id="trackForm" class="space-y-4">
+                <div>
+                    <input type="text" id="trackOrderId" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500" placeholder="รหัสออเดอร์">
+                </div>
+                <button type="submit" id="trackBtn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-700 transition shadow">
+                    ตรวจสอบ
+                </button>
+            </form>
+
+            <div id="trackResult" class="mt-6 hidden border-t border-gray-100 pt-4 text-center">
+                <!-- Timeline Progress -->
+                <div id="trackTimeline" class="mb-6 mt-2 relative max-w-[280px] mx-auto hidden">
+                    <!-- Progress Line Background & Wrapper -->
+                    <div class="absolute left-4 right-4 top-4 -translate-y-1/2 h-1 bg-gray-200 z-0 rounded-full">
+                        <!-- Active Progress Line -->
+                        <div id="timelineProgress" class="absolute left-0 top-0 h-full bg-green-500 rounded-full transition-all duration-500" style="width: 0%;"></div>
+                    </div>
+                    
+                    <!-- Steps -->
+                    <div class="flex justify-between items-center relative z-10">
+                        <div class="flex flex-col items-center gap-1" id="step1">
+                            <div class="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center shadow-sm step-icon text-gray-400 transition-colors duration-300"><i class="fa-solid fa-clipboard-list text-xs"></i></div>
+                            <span class="text-[10px] font-bold text-gray-400 step-text transition-colors duration-300">รับออเดอร์</span>
+                        </div>
+                        <div class="flex flex-col items-center gap-1" id="step2">
+                            <div class="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center shadow-sm step-icon text-gray-400 transition-colors duration-300"><i class="fa-solid fa-basket-shopping text-xs"></i></div>
+                            <span class="text-[10px] font-bold text-gray-400 step-text transition-colors duration-300">จัดหาของ</span>
+                        </div>
+                        <div class="flex flex-col items-center gap-1" id="step3">
+                            <div class="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center shadow-sm step-icon text-gray-400 transition-colors duration-300"><i class="fa-solid fa-motorcycle text-xs"></i></div>
+                            <span class="text-[10px] font-bold text-gray-400 step-text transition-colors duration-300">กำลังไปส่ง</span>
+                        </div>
+                        <div class="flex flex-col items-center gap-1" id="step4">
+                            <div class="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center shadow-sm step-icon text-gray-400 transition-colors duration-300"><i class="fa-solid fa-check text-xs"></i></div>
+                            <span class="text-[10px] font-bold text-gray-400 step-text transition-colors duration-300">สำเร็จ</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="trackStatusBadge" class="inline-block px-4 py-2 rounded-full font-bold text-sm mb-4"></div>
+                
+                <!-- Customer Info & Contact -->
+                <div id="trackCustomerInfo" class="hidden text-left mb-4">
+                    <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm">
+                        <h4 class="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-2"><i class="fa-solid fa-map-location-dot text-green-500 mr-2"></i>ข้อมูลจัดส่ง</h4>
+                        <div class="text-gray-700 space-y-1">
+                            <p><span class="font-semibold text-gray-500">ชื่อ:</span> <span id="verifyName"></span></p>
+                            <p><span class="font-semibold text-gray-500">โทร:</span> <span id="verifyPhone"></span></p>
+                            <p><span class="font-semibold text-gray-500">หอพัก:</span> <span id="verifyAddress"></span></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Payment Container -->
+                <div id="trackPaymentContainer" class="hidden text-left bg-gray-50 p-4 rounded-xl mb-4 border border-gray-200">
+                    <h4 class="font-bold text-gray-800 mb-2 border-b pb-2"><i class="fa-solid fa-file-invoice-dollar text-green-500 mr-2"></i>สรุปยอดชำระเงิน</h4>
+                    <div id="trackBillDetails" class="text-sm text-gray-600 space-y-1 mb-3"></div>
+                    <div class="flex justify-between items-center font-bold text-lg text-gray-900 border-t pt-2 mb-4">
+                        <span>ยอดรวมโอน:</span>
+                        <span id="trackTotalPrice" class="text-red-500"></span>
+                    </div>
+                    
+                    <div id="trackQrContainer" class="text-center mb-4 hidden">
+                        <p class="text-sm font-bold text-gray-700 mb-2">สแกน QR Code เพื่อชำระเงิน</p>
+                        <div class="bg-blue-50 text-blue-800 text-xs py-1.5 px-3 rounded-full inline-block mb-3 border border-blue-200 font-semibold shadow-sm">
+                            <i class="fa-solid fa-building-columns mr-1 text-blue-600"></i> น.ส. กิตติยา พุ่มสงวน
+                        </div>
+                        <div class="bg-white p-2 rounded-xl border-2 border-green-100 shadow-sm inline-block">
+                            <img id="trackQrImage" src="" class="w-full max-w-[240px] mx-auto rounded-lg">
+                        </div>
+                    </div>
+                    
+                    <div id="trackSlipUploadContainer" class="hidden">
+                        <form id="slipUploadForm" class="space-y-3">
+                            <label class="block text-sm font-bold text-gray-700">แนบสลิปโอนเงิน</label>
+                            <input type="file" id="slipInput" accept="image/*" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100">
+                            <button type="submit" id="submitSlipBtn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-xl transition text-sm">
+                                แจ้งโอนเงิน
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Delivery Photo Container -->
+                <div id="trackPhotoContainer" class="hidden">
+                    <p class="text-sm text-gray-500 mb-2">รูปภาพตอนส่งของ:</p>
+                    <img id="trackPhoto" src="" alt="Delivery Photo" class="w-full h-48 object-cover rounded-xl border border-gray-200 shadow-sm">
+                </div>
+            </div>
+
+            <!-- Support Contact -->
+            <div class="mt-6 pt-4 border-t border-gray-100 flex flex-wrap justify-center items-center gap-4 text-xs font-semibold text-gray-500">
+                <span class="text-gray-400">มีข้อสงสัยติดต่อ:</span>
+                <a href="https://instagram.com/112222" target="_blank" class="hover:text-pink-500 transition"><i class="fa-brands fa-instagram mr-1"></i> 112222</a>
+                <a href="tel:0941305124" class="hover:text-green-600 transition"><i class="fa-solid fa-phone mr-1"></i> 0941305124</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal -->
+    <div id="alertModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 backdrop-blur-sm transition-opacity">
+        <div class="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 transform transition-all">
+            <div class="text-center mb-4">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                    <i id="alertIcon" class="fa-solid fa-bell text-green-600 text-xl"></i>
+                </div>
+                <h3 id="alertTitle" class="text-xl font-bold text-gray-900 mb-2">แจ้งเตือน</h3>
+                <p id="alertMessage" class="text-gray-600 text-sm">ข้อความ</p>
+            </div>
+            <button onclick="closeAlert()" class="w-full bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 transition shadow">ตกลง</button>
+        </div>
+    </div>
+
+    <script src="script.js?v=19"></script>
+</body>
+</html>
