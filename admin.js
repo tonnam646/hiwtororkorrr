@@ -38,7 +38,9 @@ loginForm.addEventListener('submit', (e) => {
     if (passwordInput.value === '66040114545') {
         loginScreen.classList.add('hidden');
         adminApp.classList.remove('hidden');
+        requestNotificationPermission();
         fetchOrders();
+        startPolling();
     } else {
         loginError.classList.remove('hidden');
         passwordInput.value = '';
@@ -146,9 +148,86 @@ async function toggleShopStatus() {
 document.addEventListener('DOMContentLoaded', fetchShopStatus);
 
 let knownOrderIds = new Set();
-// Create audio element for notification
-const notificationSound = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
 let isInitialLoad = true;
+let pollingInterval = null;
+
+// ============================================================
+// Notification System
+// ============================================================
+
+// Request browser notification permission on login
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+// Play notification sound (beep 3 times for new order)
+function playNewOrderSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const beep = (startTime) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0.6, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3);
+            osc.start(startTime);
+            osc.stop(startTime + 0.3);
+        };
+        beep(ctx.currentTime);
+        beep(ctx.currentTime + 0.4);
+        beep(ctx.currentTime + 0.8);
+    } catch(e) {
+        console.log('Audio error:', e);
+    }
+}
+
+// Show browser notification
+function showBrowserNotification(count) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const n = new Notification('🛒 มีออเดอร์ใหม่! - hiwtororkorrr', {
+            body: `มี ${count} ออเดอร์ใหม่รอดำเนินการครับ`,
+            icon: 'hiwtororkorrr.png',
+            badge: 'hiwtororkorrr.png',
+            requireInteraction: true,
+            tag: 'new-order'
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+        // Auto-close after 10 seconds
+        setTimeout(() => n.close(), 10000);
+    }
+}
+
+// Flash tab title
+let flashInterval = null;
+function flashTabTitle(count) {
+    if (flashInterval) clearInterval(flashInterval);
+    const original = document.title;
+    let toggle = false;
+    flashInterval = setInterval(() => {
+        document.title = toggle ? `🔔 ${count} ออเดอร์ใหม่!` : original;
+        toggle = !toggle;
+    }, 1000);
+    // Stop flashing after 30 seconds
+    setTimeout(() => {
+        clearInterval(flashInterval);
+        flashInterval = null;
+        document.title = original;
+    }, 30000);
+}
+
+// ============================================================
+// Smart Polling: เร็วขึ้นเป็น 15 วิ ลดการโหลดซ้ำที่ไม่จำเป็น
+// ============================================================
+function startPolling() {
+    if (pollingInterval) clearInterval(pollingInterval);
+    pollingInterval = setInterval(fetchOrders, 15000); // 15 seconds
+}
+
 
 function updateDashboard() {
     let ordersToday = 0;
@@ -196,16 +275,22 @@ function renderOrders() {
     tableContainer.classList.remove('hidden');
     ordersTableBody.innerHTML = '';
     
-    // Check for new orders to play sound
-    let hasNewOrder = false;
+    // Check for new orders
+    let newOrderCount = 0;
     allOrders.forEach(o => {
         if (!knownOrderIds.has(o.OrderID)) {
-            if (!isInitialLoad) hasNewOrder = true;
+            if (!isInitialLoad) newOrderCount++;
             knownOrderIds.add(o.OrderID);
         }
     });
-    if (hasNewOrder) {
-        notificationSound.play().catch(e => console.log('Autoplay prevented:', e));
+    
+    if (newOrderCount > 0) {
+        // 1. Play sound (3 beeps)
+        playNewOrderSound();
+        // 2. Browser notification
+        showBrowserNotification(newOrderCount);
+        // 3. Flash tab title
+        flashTabTitle(newOrderCount);
     }
     isInitialLoad = false;
     
