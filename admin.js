@@ -404,6 +404,15 @@ function renderOrders() {
         `;
         
         statusHtml += `<div class="text-center space-y-2 mt-3 border-t border-gray-100 pt-2">`;
+        
+        // Show tip badge if customer left a tip
+        if (order.Tip && parseFloat(order.Tip) > 0) {
+            statusHtml += `
+                <div class="bg-pink-50 border border-pink-200 rounded-lg px-3 py-1.5 text-xs font-bold text-pink-700 flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-heart"></i> ทิป: ${order.Tip} ฿
+                </div>
+            `;
+        }
         if (order.Slip) {
             const thumbUrl = processDriveUrl(order.Slip);
             statusHtml += `

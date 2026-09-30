@@ -478,7 +478,6 @@ function handleTrackResponse(result) {
             if (result.orderStatus === 'รอชำระเงิน') {
                 const totalAmount = parseFloat(result.TotalPrice) || 0;
                 if (totalAmount > 0) {
-                    // ใช้ promptpay.io สร้าง QR แบบระบุยอดเงิน (หมายเลขบัตรประชาชน 13 หลัก)
                     document.getElementById('trackQrImage').src = `https://promptpay.io/1100201867505/${totalAmount}.png`;
                 } else {
                     document.getElementById('trackQrImage').src = 'S__258760717.jpg';
@@ -486,6 +485,22 @@ function handleTrackResponse(result) {
                 
                 document.getElementById('trackQrContainer').classList.remove('hidden');
                 document.getElementById('trackSlipUploadContainer').classList.remove('hidden');
+                
+                // Store base amount so tip can update QR dynamically
+                window.basePaymentAmount = totalAmount;
+                
+                // Hook tip input to live-update the QR code
+                const tipEl = document.getElementById('tipAmount');
+                if (tipEl) {
+                    tipEl.value = '';
+                    tipEl.oninput = function() {
+                        const tip = parseFloat(this.value) || 0;
+                        const newTotal = window.basePaymentAmount + tip;
+                        if (newTotal > 0) {
+                            document.getElementById('trackQrImage').src = `https://promptpay.io/1100201867505/${newTotal}.png`;
+                        }
+                    };
+                }
             }
         }
         else if (result.orderStatus === 'ยกเลิก/ของหมด') {
@@ -536,11 +551,15 @@ if (slipUploadForm) {
         const reader = new FileReader();
         reader.onload = async function(ev) {
             try {
+                const tipEl = document.getElementById('tipAmount');
+                const tip = tipEl ? (parseFloat(tipEl.value) || 0) : 0;
+
                 const payload = {
                     action: 'updateStatus',
                     orderId: currentTrackedOrderId,
                     status: 'รอตรวจสอบยอด',
-                    slipBase64: ev.target.result
+                    slipBase64: ev.target.result,
+                    tip: tip
                 };
                 
                 await fetch(SCRIPT_URL, {
