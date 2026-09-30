@@ -244,6 +244,7 @@ checkoutForm.addEventListener('submit', async (e) => {
             
             // Save order ID to local storage to remember customer's order
             localStorage.setItem('myActiveOrderId', result.orderId);
+            fetchLiveStatus(); // Refresh live table immediately!
             
             cart = [];
             updateCartUI();
@@ -260,6 +261,7 @@ checkoutForm.addEventListener('submit', async (e) => {
     } catch (error) {
         console.error('Error submitting order:', error);
         showAlert('ส่งออเดอร์สำเร็จ!', 'ระบบได้รับข้อมูลของคุณแล้ว (โหมด Fallback)', 'fa-circle-check', 'text-green-500', 'bg-green-100');
+        fetchLiveStatus();
         cart = [];
         updateCartUI();
         checkoutForm.reset();
@@ -317,9 +319,14 @@ if (trackForm) {
         trackBtn.disabled = true;
         trackResult.classList.add('hidden');
 
+        // Clean up old script tag if exists
+        const oldTrackScript = document.getElementById('trackScriptTag');
+        if (oldTrackScript) oldTrackScript.remove();
+
         // Use JSONP to bypass CORS on file:///
         const script = document.createElement('script');
-        script.src = `${SCRIPT_URL}?action=trackOrder&orderId=${orderId}&callback=handleTrackResponse`;
+        script.id = 'trackScriptTag';
+        script.src = `${SCRIPT_URL}?action=trackOrder&orderId=${encodeURIComponent(orderId)}&callback=handleTrackResponse&t=${Date.now()}`;
         
         script.onerror = () => {
             showAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อกับระบบได้', 'fa-wifi', 'text-red-500', 'bg-red-100');
@@ -333,15 +340,103 @@ if (trackForm) {
 
 let currentTrackedOrderId = null;
 
-function handleTrackResponse(result) {
-    trackBtn.innerHTML = 'ตรวจสอบ';
-    trackBtn.disabled = false;
+function silentRefreshTrack(orderId) {
+    if (!orderId) return;
+    const old = document.getElementById('silentTrackScript');
+    if (old) old.remove();
+    const script = document.createElement('script');
+    script.id = 'silentTrackScript';
+    script.src = `${SCRIPT_URL}?action=trackOrder&orderId=${encodeURIComponent(orderId)}&callback=handleSilentTrackResponse&t=${Date.now()}`;
+    document.body.appendChild(script);
+}
+
+function handleSilentTrackResponse(result) {
+    const old = document.getElementById('silentTrackScript');
+    if (old) old.remove();
+    if (result && result.status === 'success') {
+        handleTrackResponse(result, true);
+    }
+}
+
+// Copy Citizen ID PromptPay to clipboard
+function copyPromptPayId() {
+    const id = '1100201867505';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(id).then(() => {
+            showAlert('คัดลอกสำเร็จ', 'คัดลอกเลขบัตรประชาชนพร้อมเพย์ 1100201867505 เรียบร้อยแล้ว', 'fa-copy', 'text-blue-600', 'bg-blue-100');
+        }).catch(() => {
+            showAlert('เลขบัตรประชาชน', '1100201867505 (น.ส. กิตติยา พุ่มสงวน)', 'fa-id-card', 'text-blue-600', 'bg-blue-100');
+        });
+    } else {
+        showAlert('เลขบัตรประชาชน', '1100201867505 (น.ส. กิตติยา พุ่มสงวน)', 'fa-id-card', 'text-blue-600', 'bg-blue-100');
+    }
+}
+
+// Quick Tip Buttons
+function addTip(amount) {
+    const tipEl = document.getElementById('tipAmount');
+    if (!tipEl) return;
+    const current = parseFloat(tipEl.value) || 0;
+    tipEl.value = current + amount;
+    updatePaymentQrWithTip();
+}
+
+function clearTip() {
+    const tipEl = document.getElementById('tipAmount');
+    if (!tipEl) return;
+    tipEl.value = '';
+    updatePaymentQrWithTip();
+}
+
+// Generate PromptPay QR Code dynamically based on Base Total + Tip
+function updatePaymentQrWithTip() {
+    const tipEl = document.getElementById('tipAmount');
+    const tip = tipEl ? (parseFloat(tipEl.value) || 0) : 0;
+    const base = parseFloat(window.basePaymentAmount) || 0;
+    const totalToPay = Math.round((base + tip) * 100) / 100;
     
-    if (result.status === 'success') {
+    const qrImg = document.getElementById('trackQrImage');
+    const totalEl = document.getElementById('trackTotalPrice');
+    const badgeEl = document.getElementById('trackQrAmountBadge');
+
+    // หมายเลขบัตรประชาชน 13 หลักของพร้อมเพย์ (น.ส. กิตติยา พุ่มสงวน)
+    const citizenId = '1100201867505';
+
+    if (qrImg) {
+        if (totalToPay > 0) {
+            qrImg.src = `https://promptpay.io/${citizenId}/${totalToPay}.png`;
+        } else {
+            // ถ้ายอดรวมเป็น 0 ให้สร้างเป็น QR พร้อมเพย์แบบไม่ระบุยอดเงิน (ลูกค้ากรอกยอดเองได้)
+            qrImg.src = `https://promptpay.io/${citizenId}.png`;
+        }
+    }
+
+    if (totalEl) {
+        totalEl.textContent = `${totalToPay} ฿`;
+    }
+
+    if (badgeEl) {
+        if (totalToPay > 0) {
+            badgeEl.textContent = `ยอดสแกนพร้อมเพย์: ${totalToPay} ฿`;
+        } else {
+            badgeEl.textContent = `พร้อมเพย์: สแกนระบุยอดเอง`;
+        }
+    }
+}
+
+function handleTrackResponse(result, isSilent = false) {
+    if (!isSilent && trackBtn) {
+        trackBtn.innerHTML = 'ตรวจสอบ';
+        trackBtn.disabled = false;
+    }
+    
+    if (result && result.status === 'success') {
         currentTrackedOrderId = result.orderId || result.OrderID;
         trackResult.classList.remove('hidden');
         
         // Hide containers initially
+        const itemsPhotoCard = document.getElementById('trackItemsPhotoCard');
+        if (itemsPhotoCard) itemsPhotoCard.classList.add('hidden');
         document.getElementById('trackPhotoContainer').classList.add('hidden');
         document.getElementById('trackPaymentContainer').classList.add('hidden');
         document.getElementById('trackQrContainer').classList.add('hidden');
@@ -350,17 +445,61 @@ function handleTrackResponse(result) {
         const trackCustomerInfo = document.getElementById('trackCustomerInfo');
         if (trackCustomerInfo) trackCustomerInfo.classList.add('hidden');
         
-        // Helper to convert Drive URL
+        // Check local storage fallback (for instant preview on same device)
+        if (!result.ItemsPhoto && currentTrackedOrderId) {
+            try {
+                const localPhoto = localStorage.getItem('localItemsPhoto_' + currentTrackedOrderId);
+                if (localPhoto) result.ItemsPhoto = localPhoto;
+            } catch(e) {}
+        }
+        if (!result.DeliveryPhoto && !result.deliveryPhoto && currentTrackedOrderId) {
+            try {
+                const localDel = localStorage.getItem('localDeliveryPhoto_' + currentTrackedOrderId);
+                if (localDel) result.DeliveryPhoto = localDel;
+            } catch(e) {}
+        }
+
+        // Helper to convert Drive URL directly to high-res image
         const processDriveUrl = (url) => {
-            if (!url) return null;
+            if (!url) return '';
             let fileId = null;
             if (url.includes('/file/d/')) {
                 fileId = url.split('/file/d/')[1].split('/')[0];
             } else if (url.includes('id=')) {
                 fileId = url.split('id=')[1].split('&')[0];
             }
-            return fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w800` : url;
+            return fileId ? `https://lh3.googleusercontent.com/d/${fileId}=w800` : url;
         };
+
+        // 1. Display ItemsPhoto if rider uploaded it (for customer to verify)
+        if (result.ItemsPhoto) {
+            const itemsUrl = processDriveUrl(result.ItemsPhoto);
+            const card = document.getElementById('trackItemsPhotoCard');
+            const img = document.getElementById('trackItemsPhoto');
+            const link = document.getElementById('trackItemsPhotoLink');
+            if (card && img) {
+                img.src = itemsUrl;
+                if (link) link.href = itemsUrl;
+                card.classList.remove('hidden');
+            }
+        }
+
+        // 2. Display DeliveryPhoto (รูปจัดส่งสำเร็จ)
+        // แสดงให้ลูกค้าเห็นเฉพาะเมื่อถึงขั้นตอนส่งของ / ส่งสำเร็จแล้วเท่านั้น (ไม่แสดงตอนที่ยังรอชำระเงินหรือรอตรวจสอบยอด)
+        const deliveryPhoto = result.deliveryPhoto || result.DeliveryPhoto;
+        const isDeliveryStage = result.orderStatus === 'Delivered' || result.orderStatus === 'กำลังจัดส่ง' || result.orderStatus === 'กำลังไปส่ง';
+        const deliveryCard = document.getElementById('trackPhotoContainer');
+        const deliveryImg = document.getElementById('trackPhoto');
+
+        if (deliveryPhoto && isDeliveryStage) {
+            const deliveryUrl = processDriveUrl(deliveryPhoto);
+            if (deliveryCard && deliveryImg) {
+                deliveryImg.src = deliveryUrl;
+                deliveryCard.classList.remove('hidden');
+            }
+        } else {
+            if (deliveryCard) deliveryCard.classList.add('hidden');
+        }
 
         // --- TIMELINE LOGIC ---
         const trackTimeline = document.getElementById('trackTimeline');
@@ -413,13 +552,13 @@ function handleTrackResponse(result) {
         // ----------------------
         
         if (result.orderStatus === 'Delivered') {
-            localStorage.removeItem('myActiveOrderId'); // Clear saved order
-            trackStatusBadge.textContent = 'ส่งของแล้ว';
+            trackStatusBadge.innerHTML = '<i class="fa-solid fa-circle-check mr-1"></i> จัดส่งสำเร็จแล้ว';
             trackStatusBadge.className = 'inline-block px-4 py-2 rounded-full font-bold text-sm mb-4 bg-green-100 text-green-700';
-            
-            if (result.deliveryPhoto) {
-                document.getElementById('trackPhoto').src = processDriveUrl(result.deliveryPhoto);
-                document.getElementById('trackPhotoContainer').classList.remove('hidden');
+
+            // Show Delivery Photo (รูปจัดส่งสำเร็จ)
+            if (deliveryPhoto && deliveryCard && deliveryImg) {
+                deliveryImg.src = processDriveUrl(deliveryPhoto);
+                deliveryCard.classList.remove('hidden');
             }
         } 
         else if (result.orderStatus === 'รอชำระเงิน' || result.orderStatus === 'รอตรวจสอบยอด') {
@@ -429,6 +568,9 @@ function handleTrackResponse(result) {
                 : 'inline-block px-4 py-2 rounded-full font-bold text-sm mb-4 bg-orange-100 text-orange-700';
                 
             document.getElementById('trackPaymentContainer').classList.remove('hidden');
+
+            // Hide delivery photo during payment and slip review
+            if (deliveryCard) deliveryCard.classList.add('hidden');
             
             if (trackCustomerInfo) {
                 document.getElementById('verifyName').textContent = result.CustomerName || '-';
@@ -462,10 +604,15 @@ function handleTrackResponse(result) {
                 const thumbUrl = processDriveUrl(result.ItemsPhoto);
                 billHtml += `
                     <div class="mt-3 border-t border-gray-200 pt-3 text-center">
-                        <span class="block text-[11px] font-bold text-gray-500 mb-2"><i class="fa-solid fa-camera"></i> รูปสินค้าที่จัดหาได้ (ตรวจสอบก่อนโอน)</span>
-                        <a href="${thumbUrl}" target="_blank" class="inline-block border-2 border-blue-100 rounded-lg overflow-hidden hover:border-blue-300 transition shadow-sm">
-                            <img src="${thumbUrl}" class="h-32 object-cover" alt="Items Photo">
-                        </a>
+                        <span class="block text-[11px] font-bold text-gray-500 mb-2"><i class="fa-solid fa-camera"></i> รูปสินค้าที่จัดหาได้ (ตรวจสอบก่อนโอน - แตะเพื่อดูรูปใหญ่)</span>
+                        <div onclick="viewFullImage('${thumbUrl}', '🛍️ รูปสินค้าที่จัดเสร็จแล้ว')" class="inline-block border-2 border-blue-200 rounded-xl overflow-hidden hover:border-blue-400 transition shadow-sm cursor-pointer relative group">
+                            <img src="${thumbUrl}" class="h-36 object-contain bg-white px-2 py-1" alt="Items Photo">
+                            <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                                <span class="bg-black/75 text-white text-xs font-bold py-1 px-2.5 rounded-full flex items-center gap-1 shadow">
+                                    <i class="fa-solid fa-expand"></i> ดูรูปใหญ่
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 `;
             }
@@ -477,30 +624,30 @@ function handleTrackResponse(result) {
             
             if (result.orderStatus === 'รอชำระเงิน') {
                 const totalAmount = parseFloat(result.TotalPrice) || 0;
-                if (totalAmount > 0) {
-                    document.getElementById('trackQrImage').src = `https://promptpay.io/1100201867505/${totalAmount}.png`;
-                } else {
-                    document.getElementById('trackQrImage').src = 'S__258760717.jpg';
-                }
+                window.basePaymentAmount = totalAmount;
                 
                 document.getElementById('trackQrContainer').classList.remove('hidden');
                 document.getElementById('trackSlipUploadContainer').classList.remove('hidden');
+                const slipMsg = document.getElementById('trackSlipUploadedMsg');
+                if (slipMsg) slipMsg.classList.add('hidden');
                 
-                // Store base amount so tip can update QR dynamically
-                window.basePaymentAmount = totalAmount;
-                
-                // Hook tip input to live-update the QR code
+                // Hook tip input to live-update the PromptPay QR code
                 const tipEl = document.getElementById('tipAmount');
                 if (tipEl) {
-                    tipEl.value = '';
-                    tipEl.oninput = function() {
-                        const tip = parseFloat(this.value) || 0;
-                        const newTotal = window.basePaymentAmount + tip;
-                        if (newTotal > 0) {
-                            document.getElementById('trackQrImage').src = `https://promptpay.io/1100201867505/${newTotal}.png`;
-                        }
-                    };
+                    if (!isSilent && document.activeElement !== tipEl) {
+                        tipEl.value = '';
+                    }
+                    tipEl.oninput = updatePaymentQrWithTip;
                 }
+
+                // Render dynamic QR code and total price immediately
+                updatePaymentQrWithTip();
+            } else if (result.orderStatus === 'รอตรวจสอบยอด') {
+                // แนบสลิปแล้ว ซ่อน QR และฟอร์มแนบสลิป แสดงข้อความกำลังตรวจสอบยอด
+                document.getElementById('trackQrContainer').classList.add('hidden');
+                document.getElementById('trackSlipUploadContainer').classList.add('hidden');
+                const slipMsg = document.getElementById('trackSlipUploadedMsg');
+                if (slipMsg) slipMsg.classList.remove('hidden');
             }
         }
         else if (result.orderStatus === 'ยกเลิก/ของหมด') {
@@ -509,16 +656,18 @@ function handleTrackResponse(result) {
             trackStatusBadge.className = 'inline-block px-4 py-2 rounded-full font-bold text-sm mb-4 bg-red-100 text-red-700';
         }
         else {
-            if (result.orderStatus === 'กำลังจัดส่ง' && result.ETA) {
-                trackStatusBadge.innerHTML = `<i class="fa-solid fa-motorcycle mr-1"></i> ${result.orderStatus}<br><span class="text-xs font-normal mt-1 block"><i class="fa-regular fa-clock"></i> ถึงภายใน: <b>${result.ETA}</b></span>`;
-                trackStatusBadge.className = 'inline-block px-4 py-2 rounded-xl font-bold text-sm mb-4 bg-blue-100 text-blue-700 text-center';
+            if (result.orderStatus === 'กำลังจัดส่ง' || result.orderStatus === 'กำลังไปส่ง') {
+                trackStatusBadge.innerHTML = `<i class="fa-solid fa-motorcycle mr-1"></i> ${result.orderStatus || 'กำลังไปส่ง'}`;
+                trackStatusBadge.className = 'inline-block px-4 py-2 rounded-full font-bold text-sm mb-4 bg-blue-100 text-blue-700 text-center';
             } else {
                 trackStatusBadge.textContent = result.orderStatus || 'กำลังจัดหา';
                 trackStatusBadge.className = 'inline-block px-4 py-2 rounded-full font-bold text-sm mb-4 bg-yellow-100 text-yellow-700';
             }
         }
     } else {
-        showAlert('ไม่พบออเดอร์', 'ไม่พบรหัสออเดอร์นี้ในระบบ กรุณาตรวจสอบอีกครั้ง', 'fa-magnifying-glass-minus', 'text-red-500', 'bg-red-100');
+        if (!isSilent) {
+            showAlert('ไม่พบออเดอร์', 'ไม่พบรหัสออเดอร์นี้ในระบบ กรุณาตรวจสอบอีกครั้ง', 'fa-magnifying-glass-minus', 'text-red-500', 'bg-red-100');
+        }
     }
 }
 
@@ -532,6 +681,7 @@ function openTrackFor(orderId) {
         trackOrderId.value = orderId;
         trackModal.classList.remove('hidden');
         trackBtn.click(); // Auto submit
+        fetchLiveStatus();
     }
 }
 
@@ -569,9 +719,11 @@ if (slipUploadForm) {
                 
                 showAlert('ส่งสลิปสำเร็จ', 'ระบบได้รับสลิปแล้ว กำลังรอแอดมินตรวจสอบยอดครับ', 'fa-check', 'text-green-600', 'bg-green-100');
                 closeTrackModal();
+                fetchLiveStatus();
             } catch (error) {
                 showAlert('ส่งสลิปสำเร็จ', 'ระบบได้รับสลิปแล้ว กำลังรอแอดมินตรวจสอบยอดครับ', 'fa-check', 'text-green-600', 'bg-green-100');
                 closeTrackModal();
+                fetchLiveStatus();
             } finally {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
@@ -581,25 +733,67 @@ if (slipUploadForm) {
     });
 }
 
+let livePollTimer = null;
+let isFetchingLiveStatus = false;
+
+function scheduleNextLivePoll(delayMs = 5000) {
+    if (livePollTimer) clearTimeout(livePollTimer);
+    if (document.hidden) return; // ไม่ดึงข้อมูลเมื่อสลับไปแท็บอื่น เพื่อประหยัดเน็ตและลดโหลดเซิร์ฟเวอร์
+    livePollTimer = setTimeout(() => {
+        fetchLiveStatus();
+    }, delayMs);
+}
+
+function startLivePolling() {
+    if (livePollTimer) clearTimeout(livePollTimer);
+    scheduleNextLivePoll(5000);
+}
+
+// Auto-refresh immediately when user switches back to this tab
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        fetchLiveStatus();
+        checkShopStatus();
+    } else {
+        if (livePollTimer) clearTimeout(livePollTimer);
+    }
+});
+
 // --- Live Status Board Logic ---
 document.addEventListener('DOMContentLoaded', () => {
+    // 1. Render immediately from local cache if available (0ms instant display)
+    try {
+        const saved = localStorage.getItem('cachedLiveOrders');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                renderLiveStatus(parsed);
+            }
+        }
+    } catch(e) {}
+
+    // 2. Fetch fresh data from backend & start adaptive polling
     if (!SCRIPT_URL.includes('YOUR_SCRIPT_ID')) {
         fetchLiveStatus();
         checkShopStatus();
-        setInterval(() => {
-            fetchLiveStatus();
-            checkShopStatus();
-        }, 30000);
+        setInterval(checkShopStatus, 90000); // ตรวจสถานะร้านทุก 90 วินาทีแบบเบาๆ
+        startLivePolling();
     }
 });
 
 function checkShopStatus() {
+    const old = document.getElementById('shopStatusScript');
+    if (old) old.remove();
     const script = document.createElement('script');
-    script.src = `${SCRIPT_URL}?action=getShopStatus&callback=applyShopStatus`;
+    script.id = 'shopStatusScript';
+    script.src = `${SCRIPT_URL}?action=getShopStatus&callback=applyShopStatus&t=${Date.now()}`;
     document.body.appendChild(script);
 }
 
 function applyShopStatus(data) {
+    const old = document.getElementById('shopStatusScript');
+    if (old) old.remove();
+
     const alertBox = document.getElementById('shopClosedAlert');
     const submitBtn = document.getElementById('submitBtn');
     
@@ -617,16 +811,40 @@ function applyShopStatus(data) {
 }
 
 function fetchLiveStatus() {
+    if (isFetchingLiveStatus) return; // ป้องกันการส่ง request ซ้อนทับจนทำให้เว็บช้า
+    isFetchingLiveStatus = true;
+
     const tbody = document.getElementById('liveStatusBody');
-    if (!tbody) return;
+    // Only show loading spinner if table is currently empty
+    if (tbody && (!tbody.children.length || tbody.textContent.includes('ไม่สามารถเชื่อมต่อ'))) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-gray-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>กำลังดึงข้อมูล...</td></tr>';
+    }
     
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-gray-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>กำลังดึงข้อมูล...</td></tr>';
-    
+    const old = document.getElementById('liveStatusScript');
+    if (old) old.remove();
+
     const script = document.createElement('script');
-    script.src = `${SCRIPT_URL}?action=getOrders&callback=renderLiveStatus`;
+    script.id = 'liveStatusScript';
+    script.src = `${SCRIPT_URL}?action=getOrders&callback=renderLiveStatus&t=${Date.now()}`;
     
+    const timeoutId = setTimeout(() => {
+        isFetchingLiveStatus = false;
+        script.remove();
+        scheduleNextLivePoll(6000);
+    }, 20000);
+
+    script.onload = () => {
+        clearTimeout(timeoutId);
+    };
+
     script.onerror = () => {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-red-400">ไม่สามารถเชื่อมต่อกับระบบได้</td></tr>';
+        clearTimeout(timeoutId);
+        isFetchingLiveStatus = false;
+        script.remove();
+        if (tbody && !tbody.children.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-red-400">ไม่สามารถเชื่อมต่อกับระบบได้</td></tr>';
+        }
+        scheduleNextLivePoll(8000);
     };
     
     document.body.appendChild(script);
@@ -651,16 +869,56 @@ function switchLiveTab(tab) {
     if (window.cachedLiveOrders) {
         renderLiveStatus(window.cachedLiveOrders);
     }
+    fetchLiveStatus();
 }
 
 function renderLiveStatus(orders) {
+    isFetchingLiveStatus = false;
+    const old = document.getElementById('liveStatusScript');
+    if (old) old.remove();
+
+    // Schedule next poll 5 seconds AFTER current data is processed
+    scheduleNextLivePoll(5000);
+
+    if (!orders) return;
     window.cachedLiveOrders = orders;
+    try {
+        if (Array.isArray(orders) && orders.length > 0) {
+            localStorage.setItem('cachedLiveOrders', JSON.stringify(orders));
+        }
+    } catch(e) {}
+
+    // Auto-update open tracking modal directly from orders without extra network requests
+    const trackModal = document.getElementById('trackModal');
+    if (trackModal && !trackModal.classList.contains('hidden') && currentTrackedOrderId && Array.isArray(orders)) {
+        const matched = orders.find(o => String(o.OrderID || '').trim().toUpperCase() === String(currentTrackedOrderId).trim().toUpperCase());
+        if (matched) {
+            handleTrackResponse({
+                status: 'success',
+                orderId: matched.OrderID,
+                orderStatus: matched.Status,
+                CustomerName: matched.CustomerName,
+                Phone: matched.Phone,
+                DormName: matched.DormName,
+                LocationLink: matched.LocationLink,
+                Items: matched.Items,
+                TotalItems: matched.TotalItems,
+                TotalPrice: matched.TotalPrice,
+                DeliveryFee: matched.DeliveryFee,
+                ItemsPhoto: matched.ItemsPhoto,
+                DeliveryPhoto: matched.DeliveryPhoto || matched.deliveryPhoto,
+                Slip: matched.Slip,
+                Tip: matched.Tip
+            }, true);
+        }
+    }
     
     const tbody = document.getElementById('liveStatusBody');
     if (!tbody) return;
     
-    if (!orders || orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-gray-400">ยังไม่มีรายการสั่งซื้อในระบบ</td></tr>';
+    if (orders.length === 0) {
+        const emptyHtml = '<tr><td colspan="4" class="text-center p-6 text-gray-400">ยังไม่มีรายการสั่งซื้อในระบบ</td></tr>';
+        if (tbody.innerHTML !== emptyHtml) tbody.innerHTML = emptyHtml;
         return;
     }
     
@@ -674,17 +932,18 @@ function renderLiveStatus(orders) {
     });
     
     if (filteredOrders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-gray-400">ยังไม่มีออเดอร์ในหมวดหมู่นี้</td></tr>';
+        const emptyHtml = '<tr><td colspan="4" class="text-center p-6 text-gray-400">ยังไม่มีออเดอร์ในหมวดหมู่นี้</td></tr>';
+        if (tbody.innerHTML !== emptyHtml) tbody.innerHTML = emptyHtml;
         return;
     }
     
     const recentOrders = filteredOrders.slice(0, 10);
     
-    tbody.innerHTML = recentOrders.map(order => {
+    const newHtml = recentOrders.map(order => {
         let statusBadge = '';
         if (order.Status === 'Delivered') {
             statusBadge = '<span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold"><i class="fa-solid fa-check mr-1"></i> ส่งแล้ว</span>';
-        } else if (order.Status === 'กำลังไปส่ง') {
+        } else if (order.Status === 'กำลังไปส่ง' || order.Status === 'กำลังจัดส่ง') {
             statusBadge = '<span class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold"><i class="fa-solid fa-motorcycle mr-1"></i> กำลังไปส่ง</span>';
         } else if (order.Status === 'รอชำระเงิน' || order.Status === 'รอตรวจสอบยอด') {
             statusBadge = `<span class="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold"><i class="fa-solid fa-file-invoice-dollar mr-1"></i> ${order.Status}</span>`;
@@ -710,6 +969,10 @@ function renderLiveStatus(orders) {
             </tr>
         `;
     }).join('');
+
+    if (tbody.innerHTML !== newHtml) {
+        tbody.innerHTML = newHtml;
+    }
 }
 
 // Auto-open active order on page load
@@ -718,4 +981,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (activeOrderId) {
         openTrackFor(activeOrderId);
     }
+});
+
+// Fullscreen Lightbox Image Viewer
+function viewFullImage(imgUrl, title = 'รูปภาพ') {
+    if (!imgUrl) return;
+    const modal = document.getElementById('imageViewerModal');
+    const img = document.getElementById('imageViewerImg');
+    const titleEl = document.getElementById('imageViewerTitle');
+    if (modal && img) {
+        img.src = imgUrl;
+        if (titleEl) titleEl.textContent = title;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeImageViewer() {
+    const modal = document.getElementById('imageViewerModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        const img = document.getElementById('imageViewerImg');
+        if (img) img.src = '';
+        document.body.style.overflow = '';
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeImageViewer();
 });

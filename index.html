@@ -198,7 +198,13 @@
     <div class="container mx-auto p-4 max-w-5xl mb-12">
         <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
             <div class="flex justify-between items-center mb-2 pb-2">
-                <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-list-check text-green-500 mr-2"></i>สถานะออเดอร์ล่าสุด (Live)</h2>
+                <div class="flex items-center gap-2">
+                    <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-list-check text-green-500 mr-2"></i>สถานะออเดอร์ล่าสุด (Live)</h2>
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        อัปเดตอัตโนมัติ
+                    </span>
+                </div>
                 <button onclick="fetchLiveStatus()" class="text-sm text-green-600 hover:underline font-semibold"><i class="fa-solid fa-rotate-right mr-1"></i> อัปเดต</button>
             </div>
             
@@ -287,6 +293,25 @@
                     </div>
                 </div>
                 
+                <!-- Items Photo Card for Customer (รูปของที่จัดเสร็จ) -->
+                <div id="trackItemsPhotoCard" class="hidden text-left mb-4 bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 shadow-sm">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-amber-900 text-sm flex items-center gap-1.5">
+                            <i class="fa-solid fa-basket-shopping text-amber-600"></i> รูปสินค้าที่จัดเสร็จแล้ว
+                        </span>
+                        <span class="text-xs bg-amber-200 text-amber-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <i class="fa-solid fa-circle-check text-amber-700"></i> ถ่ายรูปให้ตรวจแล้ว
+                        </span>
+                    </div>
+                    <p class="text-xs text-amber-800 mb-3 font-medium">ไรเดอร์ถ่ายรูปสินค้าที่จัดหาได้เรียบร้อยแล้ว ตรวจสอบรายการด้านล่างได้เลยครับ (คลิกเพื่อดูรูปใหญ่)</p>
+                    <div onclick="viewFullImage(document.getElementById('trackItemsPhoto').src, '🛍️ รูปสินค้าที่ไรเดอร์จัดเสร็จ')" class="block rounded-xl overflow-hidden border-2 border-amber-300 shadow bg-white hover:opacity-95 transition cursor-pointer relative group">
+                        <img id="trackItemsPhoto" src="" class="w-full max-h-80 object-contain bg-amber-50/30 py-1" alt="รูปสินค้าที่จัดเสร็จ">
+                        <div class="absolute bottom-2 right-2 bg-black/70 hover:bg-black/85 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 shadow backdrop-blur-sm pointer-events-none">
+                            <i class="fa-solid fa-expand"></i> แตะเพื่อดูรูปใหญ่
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Payment Container -->
                 <div id="trackPaymentContainer" class="hidden text-left bg-gray-50 p-4 rounded-xl mb-4 border border-gray-200">
                     <h4 class="font-bold text-gray-800 mb-2 border-b pb-2"><i class="fa-solid fa-file-invoice-dollar text-green-500 mr-2"></i>สรุปยอดชำระเงิน</h4>
@@ -297,22 +322,47 @@
                     </div>
                     
                     <div id="trackQrContainer" class="text-center mb-4 hidden">
-                        <p class="text-sm font-bold text-gray-700 mb-2">สแกน QR Code เพื่อชำระเงิน</p>
-                        <div class="bg-blue-50 text-blue-800 text-xs py-1.5 px-3 rounded-full inline-block mb-3 border border-blue-200 font-semibold shadow-sm">
-                            <i class="fa-solid fa-building-columns mr-1 text-blue-600"></i> น.ส. กิตติยา พุ่มสงวน
-                        </div>
-                        <div class="bg-white p-2 rounded-xl border-2 border-green-100 shadow-sm inline-block">
-                            <img id="trackQrImage" src="" class="w-full max-w-[240px] mx-auto rounded-lg">
+                        <p class="text-sm font-bold text-gray-700 mb-1">สแกน QR Code เพื่อชำระเงิน</p>
+                        <p class="text-xs text-gray-400 mb-2.5">(พร้อมเพย์ระบุยอดเงินตรงตามออเดอร์)</p>
+                        
+                        <!-- PromptPay Account Info Card (Removed as per user request) -->
+
+                        <!-- Dynamic QR Code Box -->
+                        <div class="bg-white p-3 rounded-2xl border-2 border-green-200 shadow-md inline-block">
+                            <img id="trackQrImage" src="" class="w-full max-w-[230px] mx-auto rounded-xl" alt="QR Code พร้อมเพย์">
+                            <div id="trackQrAmountBadge" class="mt-2 text-xs font-black text-green-700 bg-green-50 py-1 px-3.5 rounded-full border border-green-200 inline-block shadow-sm">
+                                กำลังสร้าง QR...
+                            </div>
                         </div>
                     </div>
                     
+                    <div id="trackSlipUploadedMsg" class="hidden bg-purple-50 border border-purple-200 text-purple-800 p-4 rounded-xl text-center font-bold text-sm mb-3 shadow-sm">
+                        <i class="fa-solid fa-receipt mr-1.5 text-purple-600 text-base"></i> คุณแนบสลิปเรียบร้อยแล้ว แอดมินกำลังตรวจสอบยอดเพื่อจัดส่งครับ
+                    </div>
+
                     <div id="trackSlipUploadContainer" class="hidden">
-                        <!-- Tip Field in Payment -->
-                        <div class="bg-pink-50 border border-pink-200 rounded-xl p-3 mb-3">
-                            <label class="block text-sm font-bold text-pink-700 mb-2"><i class="fa-solid fa-heart mr-1"></i> ให้ทิปไรเดอร์ด้วยนะ (ไม่บังคับ 🙏)</label>
-                            <div class="flex items-center gap-2">
-                                <input type="number" id="tipAmount" min="0" step="1" placeholder="0" class="w-24 p-2 text-center bg-white border border-pink-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-pink-400 font-bold text-pink-700 outline-none">
-                                <span class="text-sm font-bold text-pink-600">฿</span>
+                        <!-- Tip Field in Payment (QR Updates in Real-time) -->
+                        <div class="bg-gradient-to-r from-pink-50 via-rose-50 to-pink-50 border border-pink-200 rounded-2xl p-3.5 mb-3 shadow-sm text-left">
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="text-sm font-bold text-pink-700 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-heart text-pink-500 animate-pulse"></i> ให้ทิปไรเดอร์ (ไม่บังคับ 🙏)
+                                </label>
+                                <span class="text-[10px] text-pink-600 font-bold bg-pink-100/70 border border-pink-200 px-2 py-0.5 rounded-full">
+                                    <i class="fa-solid fa-qrcode mr-0.5"></i> QR เปลี่ยนตามทิปทันที
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-2 mb-2.5">
+                                <input type="number" id="tipAmount" min="0" step="1" placeholder="0" class="w-28 p-2 text-center bg-white border-2 border-pink-300 rounded-xl focus:ring-2 focus:ring-pink-400 focus:border-pink-500 font-black text-lg text-pink-700 outline-none shadow-inner">
+                                <span class="text-sm font-bold text-pink-600">บาท</span>
+                            </div>
+                            <!-- Quick Tip Buttons -->
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="text-xs text-gray-500 font-semibold mr-0.5">เพิ่มทิปด่วน:</span>
+                                <button type="button" onclick="addTip(5)" class="text-xs font-bold bg-white hover:bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-xs">+5 ฿</button>
+                                <button type="button" onclick="addTip(10)" class="text-xs font-bold bg-white hover:bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-xs">+10 ฿</button>
+                                <button type="button" onclick="addTip(20)" class="text-xs font-bold bg-white hover:bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-xs">+20 ฿</button>
+                                <button type="button" onclick="addTip(50)" class="text-xs font-bold bg-white hover:bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-xs">+50 ฿</button>
+                                <button type="button" onclick="clearTip()" class="text-xs font-bold text-gray-400 hover:text-red-500 ml-auto px-1.5 py-1">ล้าง</button>
                             </div>
                         </div>
                         <form id="slipUploadForm" class="space-y-3">
@@ -325,10 +375,23 @@
                     </div>
                 </div>
 
-                <!-- Delivery Photo Container -->
-                <div id="trackPhotoContainer" class="hidden">
-                    <p class="text-sm text-gray-500 mb-2">รูปภาพตอนส่งของ:</p>
-                    <img id="trackPhoto" src="" alt="Delivery Photo" class="w-full h-48 object-cover rounded-xl border border-gray-200 shadow-sm">
+                <!-- Delivery Photo Container (รูปจัดส่งสำเร็จ) -->
+                <div id="trackPhotoContainer" class="hidden text-left mb-4 bg-emerald-50 p-4 rounded-2xl border-2 border-emerald-300 shadow-sm">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-emerald-900 text-sm flex items-center gap-1.5">
+                            <i class="fa-solid fa-camera text-emerald-600"></i> รูปภาพยืนยันการจัดส่งสำเร็จ
+                        </span>
+                        <span class="text-xs bg-emerald-200 text-emerald-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <i class="fa-solid fa-circle-check text-emerald-700"></i> จัดส่งสำเร็จแล้ว
+                        </span>
+                    </div>
+                    <p class="text-xs text-emerald-800 mb-3 font-medium">ไรเดอร์นำสินค้ามาส่งให้เรียบร้อยแล้วครับ ตรวจสอบรูปภาพยืนยันด้านล่างได้เลยครับ (คลิกเพื่อดูรูปใหญ่)</p>
+                    <div onclick="viewFullImage(document.getElementById('trackPhoto').src, '🛵 รูปภาพยืนยันการจัดส่งสำเร็จ')" class="block rounded-xl overflow-hidden border-2 border-emerald-300 shadow bg-white hover:opacity-95 transition cursor-pointer relative group">
+                        <img id="trackPhoto" src="" alt="Delivery Photo" class="w-full max-h-80 object-contain bg-emerald-50/30 py-1">
+                        <div class="absolute bottom-2 right-2 bg-black/70 hover:bg-black/85 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 shadow backdrop-blur-sm pointer-events-none">
+                            <i class="fa-solid fa-expand"></i> แตะเพื่อดูรูปใหญ่
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -355,6 +418,24 @@
         </div>
     </div>
 
-    <script src="script.js?v=23"></script>
+    <!-- Fullscreen Image Viewer Modal (Lightbox) -->
+    <div id="imageViewerModal" class="fixed inset-0 bg-black/90 hidden flex flex-col items-center justify-center z-50 p-4 backdrop-blur-md transition-all duration-300" onclick="closeImageViewer()">
+        <div class="relative max-w-3xl w-full max-h-[90vh] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+            <!-- Close Button -->
+            <button onclick="closeImageViewer()" class="absolute -top-12 right-0 bg-white/20 hover:bg-white/40 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl transition shadow-lg backdrop-blur-sm cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            
+            <!-- Caption -->
+            <div id="imageViewerTitle" class="text-white text-sm font-bold mb-3 drop-shadow-md text-center"></div>
+
+            <!-- Full Image -->
+            <img id="imageViewerImg" src="" alt="ภาพขยาย" class="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10 select-none bg-black/30">
+            
+            <p class="text-white/70 text-xs mt-3 bg-black/40 px-3 py-1 rounded-full"><i class="fa-solid fa-hand-pointer mr-1"></i> แตะที่ใดก็ได้หรือกดกากบาทเพื่อปิด</p>
+        </div>
+    </div>
+
+    <script src="script.js?v=32"></script>
 </body>
 </html>

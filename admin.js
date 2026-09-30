@@ -1,4 +1,4 @@
-// *** IMPORTANT ***
+﻿// *** IMPORTANT ***
 // คุณต้องนำ URL ของ Web App ที่ได้จาก Google Apps Script มาใส่ตรงนี้ (ต้องเป็น URL เดียวกับใน script.js)
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzLk2fmojtjc8upkQmYp-d7tbgaQVJw1moBGSpLWYiYd-MQ18WI-c8zYfRc4qI45vVQ/exec';
 
@@ -32,6 +32,16 @@ const alertIconContainer = document.getElementById('alertIconContainer');
 
 let deliveryBase64 = null;
 
+// Global State Variables
+let allOrders = [];
+let currentTab = 'active';
+let knownOrderIds = new Set();
+let isInitialLoad = true;
+let isFetchingOrders = false;
+let pollingInterval = null;
+let lastDataFingerprint = '';
+let pendingNewOrders = [];
+
 // Login Logic
 loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -39,7 +49,22 @@ loginForm.addEventListener('submit', (e) => {
         loginScreen.classList.add('hidden');
         adminApp.classList.remove('hidden');
         requestNotificationPermission();
-        fetchOrders();
+
+        // 1. Instant render from local cache (0ms wait!)
+        try {
+            const cached = localStorage.getItem('adminCachedOrders');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    allOrders = parsed;
+                    allOrders.forEach(o => knownOrderIds.add(o.OrderID));
+                    renderOrders();
+                }
+            }
+        } catch(e) {}
+
+        // 2. Fetch fresh data in background
+        fetchOrders(allOrders.length > 0);
         startPolling();
     } else {
         loginError.classList.remove('hidden');
@@ -47,33 +72,169 @@ loginForm.addEventListener('submit', (e) => {
     }
 });
 
-async function fetchOrders() {
-    loading.classList.remove('hidden');
-    tableContainer.classList.add('hidden');
-    errorMsg.classList.add('hidden');
+function fetchOrders(silent = false) {
+    if (isFetchingOrders) return; // Prevent overlapping requests
+    isFetchingOrders = true;
 
-    // Use JSONP to bypass CORS on file:///
+    if (!silent && allOrders.length === 0) {
+        loading.classList.remove('hidden');
+        tableContainer.classList.add('hidden');
+        errorMsg.classList.add('hidden');
+    }
+
+    // Clean up old pending JSONP tags
+    document.querySelectorAll('script[data-jsonp="orders"]').forEach(s => {
+        if (s.dataset.timeoutId) clearTimeout(parseInt(s.dataset.timeoutId));
+        s.remove();
+    });
+
     const script = document.createElement('script');
-    script.src = `${SCRIPT_URL}?action=getOrders&callback=handleOrdersResponse`;
+    script.dataset.jsonp = 'orders';
+    script.src = `${SCRIPT_URL}?action=getOrders&callback=handleOrdersResponse&t=${Date.now()}`;
 
-    // Add error handling for the script tag
+    // 25-second timeout for GAS cold start
+    const tid = setTimeout(() => {
+        script.remove();
+        isFetchingOrders = false;
+        if (!silent && allOrders.length === 0) {
+            showError('โหลดข้อมูลนานเกินไป กรุณากดปุ่มรีเฟรชอีกครั้ง');
+            loading.classList.add('hidden');
+        }
+        scheduleNextAdminPoll(8000);
+    }, 25000);
+    script.dataset.timeoutId = String(tid);
+
     script.onerror = () => {
-        showError('ไม่สามารถเชื่อมต่อกับ Google Apps Script ได้ (อาจจะถูกบล็อกหรือ URL ผิด)');
+        clearTimeout(tid);
+        script.remove();
+        isFetchingOrders = false;
+        if (!silent && allOrders.length === 0) {
+            showError('ไม่สามารถเชื่อมต่อกับ Google Apps Script ได้');
+            loading.classList.add('hidden');
+        }
+        scheduleNextAdminPoll(8000);
     };
 
     document.body.appendChild(script);
 }
 
-let allOrders = [];
-let currentTab = 'active';
+// Robust POST with retry
+async function robustPost(payload, retries = 3, delayMs = 1500) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            return data;
+        } catch(e) {
+            console.warn(`POST attempt ${i+1} failed:`, e.message);
+            if (i < retries - 1) await new Promise(r => setTimeout(r, delayMs));
+        }
+    }
+    throw new Error('POST failed after max retries');
+}
 
 // JSONP Callback
 function handleOrdersResponse(data) {
+    isFetchingOrders = false;
+
+    // Clear timeout + remove script tag
+    document.querySelectorAll('script[data-jsonp="orders"]').forEach(s => {
+        if (s.dataset.timeoutId) clearTimeout(parseInt(s.dataset.timeoutId));
+        s.remove();
+    });
+
+    // Schedule next silent poll 6 seconds AFTER current response is processed
+    scheduleNextAdminPoll(6000);
+
+    if (!Array.isArray(data)) {
+        console.error('Data received is not an array:', data);
+        loading.classList.add('hidden');
+        tableContainer.classList.remove('hidden');
+        return;
+    }
+
     lastUpdate.textContent = new Date().toLocaleTimeString('th-TH');
-    
-    // Sort from new to old once
-    allOrders = data.slice().reverse();
-    
+    const incoming = data.slice().reverse();
+
+    // Merge locally remembered photos so refreshing never loses photos
+    incoming.forEach(o => {
+        try {
+            const localItems = localStorage.getItem('localItemsPhoto_' + o.OrderID);
+            if (localItems && !o.ItemsPhoto) {
+                o.ItemsPhoto = localItems;
+            } else if (o.ItemsPhoto && o.ItemsPhoto.startsWith('http')) {
+                localStorage.removeItem('localItemsPhoto_' + o.OrderID);
+            }
+
+            const localDelivery = localStorage.getItem('localDeliveryPhoto_' + o.OrderID);
+            if (localDelivery && !o.DeliveryPhoto) {
+                o.DeliveryPhoto = localDelivery;
+            } else if (o.DeliveryPhoto && o.DeliveryPhoto.startsWith('http')) {
+                localStorage.removeItem('localDeliveryPhoto_' + o.OrderID);
+            }
+        } catch(err) {}
+    });
+
+    // Cache locally for instant next load
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(incoming));
+    } catch(e) {}
+
+    // Detect new order IDs
+    const newOnes = incoming.filter(o => !knownOrderIds.has(o.OrderID));
+    newOnes.forEach(o => knownOrderIds.add(o.OrderID));
+
+    if (!isInitialLoad && newOnes.length > 0) {
+        // Play sound + browser notification
+        playNewOrderSound();
+        showBrowserNotification(newOnes.length);
+        flashTabTitle(newOnes.length);
+
+        // Store pending data, show banner — DON'T auto re-render
+        pendingNewOrders = incoming;
+        showNewOrderBanner(newOnes.length);
+    } else {
+        const fingerprint = JSON.stringify(incoming.map(o => ({ 
+            id: o.OrderID, 
+            status: o.Status, 
+            items: o.Items, 
+            totalPrice: o.TotalPrice,
+            hasItemsPhoto: !!o.ItemsPhoto,
+            hasDeliveryPhoto: !!o.DeliveryPhoto 
+        })));
+        if (fingerprint !== lastDataFingerprint || isInitialLoad) {
+            lastDataFingerprint = fingerprint;
+            allOrders = incoming;
+            renderOrders();
+        } else {
+            loading.classList.add('hidden');
+            tableContainer.classList.remove('hidden');
+        }
+    }
+    isInitialLoad = false;
+}
+
+function showNewOrderBanner(count) {
+    let banner = document.getElementById('newOrderBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'newOrderBanner';
+        banner.className = 'fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 cursor-pointer animate-bounce';
+        banner.onclick = applyPendingOrders;
+        document.body.appendChild(banner);
+    }
+    banner.innerHTML = `<i class="fa-solid fa-bell text-xl"></i> <span class="font-bold">มีออเดอร์ใหม่ ${count} รายการ! กดเพื่อดูเลย</span> <i class="fa-solid fa-arrow-right"></i>`;
+    banner.classList.remove('hidden');
+}
+
+function applyPendingOrders() {
+    const banner = document.getElementById('newOrderBanner');
+    if (banner) banner.classList.add('hidden');
+    if (pendingNewOrders.length > 0) {
+        allOrders = pendingNewOrders;
+        pendingNewOrders = [];
+    }
+    lastDataFingerprint = JSON.stringify(allOrders.map(o => ({ id: o.OrderID, status: o.Status })));
     renderOrders();
 }
 
@@ -147,10 +308,6 @@ async function toggleShopStatus() {
 
 document.addEventListener('DOMContentLoaded', fetchShopStatus);
 
-let knownOrderIds = new Set();
-let isInitialLoad = true;
-let pollingInterval = null;
-
 // ============================================================
 // Notification System
 // ============================================================
@@ -221,12 +378,31 @@ function flashTabTitle(count) {
 }
 
 // ============================================================
-// Smart Polling: เร็วขึ้นเป็น 15 วิ ลดการโหลดซ้ำที่ไม่จำเป็น
+// Adaptive Sequential Polling: ไม่ซ้อนทับ ไม่ดึงซ้ำตอนสลับแท็บ
 // ============================================================
-function startPolling() {
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(fetchOrders, 15000); // 15 seconds
+let adminPollTimer = null;
+
+function scheduleNextAdminPoll(delayMs = 6000) {
+    if (adminPollTimer) clearTimeout(adminPollTimer);
+    if (document.hidden) return; // ไม่ดึงข้อมูลเมื่อแอดมินสลับไปแท็บอื่น
+    adminPollTimer = setTimeout(() => {
+        fetchOrders(true);
+    }, delayMs);
 }
+
+function startPolling() {
+    if (adminPollTimer) clearTimeout(adminPollTimer);
+    scheduleNextAdminPoll(6000);
+}
+
+// เมื่อแอดมินสลับกลับมาที่แท็บ ให้ดึงข้อมูลทันที
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        fetchOrders(true);
+    } else {
+        if (adminPollTimer) clearTimeout(adminPollTimer);
+    }
+});
 
 
 function updateDashboard() {
@@ -275,27 +451,11 @@ function renderOrders() {
     tableContainer.classList.remove('hidden');
     ordersTableBody.innerHTML = '';
     
-    // Check for new orders
-    let newOrderCount = 0;
-    allOrders.forEach(o => {
-        if (!knownOrderIds.has(o.OrderID)) {
-            if (!isInitialLoad) newOrderCount++;
-            knownOrderIds.add(o.OrderID);
-        }
-    });
-    
-    if (newOrderCount > 0) {
-        // 1. Play sound (3 beeps)
-        playNewOrderSound();
-        // 2. Browser notification
-        showBrowserNotification(newOrderCount);
-        // 3. Flash tab title
-        flashTabTitle(newOrderCount);
-    }
-    isInitialLoad = false;
-    
     // Update Daily Dashboard
     updateDashboard();
+    
+    // Restore checkbox states from localStorage after render
+    setTimeout(restoreChecklistStates, 50);
     
     // Filter orders by tab
     let filteredOrders = allOrders.filter(o => {
@@ -389,7 +549,10 @@ function renderOrders() {
                 itemsHtml = `
                 <div class="flex justify-between items-center mb-3">
                     <span class="text-sm font-bold text-gray-700">รายการที่ต้องซื้อ:</span>
-                    <button onclick="openEditOrderModal('${order.OrderID}')" class="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 py-1 px-3 rounded-full font-bold transition shadow-sm"><i class="fa-solid fa-pen-to-square mr-1"></i> แก้ไข/เพิ่ม/ลบรายการ</button>
+                    <div class="flex gap-2">
+                        <button onclick="openEditOrderModal('${order.OrderID}')" class="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 py-1 px-3 rounded-full font-bold transition shadow-sm"><i class="fa-solid fa-pen-to-square mr-1"></i> แก้ไข</button>
+                        <button onclick="deleteOrder('${order.OrderID}')" class="text-xs bg-red-100 text-red-700 hover:bg-red-200 py-1 px-3 rounded-full font-bold transition shadow-sm"><i class="fa-solid fa-trash mr-1"></i> ลบออเดอร์</button>
+                    </div>
                 </div>
                 `;
                 
@@ -446,6 +609,43 @@ function renderOrders() {
                             </div>
                         </div>
                     </div>
+                    ${(() => {
+                        if (!order.Status || order.Status === 'New' || order.Status === 'กำลังจัดหา') {
+                            return `
+                                <div class="mt-2.5">
+                                    <button onclick="openItemsPhotoModal('${order.OrderID}')" class="w-full ${order.ItemsPhoto ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 border-dashed border-2'} border text-xs font-bold py-2.5 px-2 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm">
+                                        <i class="fa-solid ${order.ItemsPhoto ? 'fa-circle-check text-emerald-600' : 'fa-camera text-amber-600'}"></i> 
+                                        ${order.ItemsPhoto ? '✅ ถ่ายรูปของที่จัดเสร็จแล้ว (แตะดู/เปลี่ยน)' : '📸 ถ่ายรูปของที่จัดเสร็จ (เพื่อส่งยอด)'}
+                                    </button>
+                                </div>
+                            `;
+                        } else if (order.Status === 'รอชำระเงิน' || order.Status === 'รอตรวจสอบยอด') {
+                            return `
+                                <div class="mt-2.5">
+                                    <button onclick="openItemsPhotoModal('${order.OrderID}')" class="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold py-2 px-2 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm">
+                                        <i class="fa-solid fa-basket-shopping text-emerald-600"></i> 🛍️ ดูรูปสินค้าที่ส่งให้ลูกค้าตรวจ
+                                    </button>
+                                </div>
+                            `;
+                        } else if (order.Status === 'กำลังไปส่ง' || order.Status === 'กำลังจัดส่ง') {
+                            return `
+                                <div class="mt-2.5">
+                                    <button onclick="openUploadModal('${order.OrderID}')" class="w-full ${order.DeliveryPhoto ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300 border-dashed border-2'} border text-xs font-bold py-2.5 px-2 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm">
+                                        <i class="fa-solid ${order.DeliveryPhoto ? 'fa-circle-check text-emerald-600' : 'fa-camera text-blue-600'}"></i> 
+                                        ${order.DeliveryPhoto ? '✅ ถ่ายรูปตอนส่งแล้ว (แตะดู/เปลี่ยน)' : '📸 ถ่ายรูปตอนส่งของ (วางหน้าห้อง)'}
+                                    </button>
+                                </div>
+                            `;
+                        } else if (order.Status === 'Delivered') {
+                            return `
+                                <div class="mt-2.5 flex flex-wrap gap-2">
+                                    ${order.ItemsPhoto ? `<button onclick="viewFullImage(processDriveUrl('${order.ItemsPhoto}'), '🛍️ รูปสินค้าที่จัดเสร็จ')" class="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold py-1.5 px-2 rounded-xl transition flex items-center justify-center gap-1 shadow-sm"><i class="fa-solid fa-basket-shopping text-amber-600"></i> รูปที่จัด</button>` : ''}
+                                    ${order.DeliveryPhoto ? `<button onclick="viewFullImage(processDriveUrl('${order.DeliveryPhoto}'), '🛵 รูปภาพยืนยันการส่งของ')" class="flex-1 bg-green-50 hover:bg-green-100 text-green-800 border border-green-200 text-xs font-bold py-1.5 px-2 rounded-xl transition flex items-center justify-center gap-1 shadow-sm"><i class="fa-solid fa-camera text-green-600"></i> รูปจัดส่งสำเร็จ</button>` : ''}
+                                </div>
+                            `;
+                        }
+                        return '';
+                    })()}
                 `;
             }
         } catch (e) {
@@ -467,25 +667,107 @@ function renderOrders() {
 
         // Helper to convert Drive URL
         const processDriveUrl = (url) => {
-            if (!url) return null;
+            if (!url) return '';
             let fileId = null;
             if (url.includes('/file/d/')) {
                 fileId = url.split('/file/d/')[1].split('/')[0];
             } else if (url.includes('id=')) {
                 fileId = url.split('id=')[1].split('&')[0];
             }
-            return fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w800` : url;
+            return fileId ? `https://lh3.googleusercontent.com/d/${fileId}=w800` : url;
         };
 
+        // 1. Current Status Badge
+        let badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+        let badgeLabel = '🛒 กำลังจัดหา';
+
+        if (order.Status === 'รอชำระเงิน') {
+            badgeColor = 'bg-orange-100 text-orange-800 border-orange-200';
+            badgeLabel = '⏳ รอชำระเงิน';
+        } else if (order.Status === 'รอตรวจสอบยอด') {
+            badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+            badgeLabel = '🧾 รอตรวจสอบยอด';
+        } else if (order.Status === 'กำลังไปส่ง' || order.Status === 'กำลังจัดส่ง') {
+            badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+            badgeLabel = '🛵 กำลังไปส่ง';
+        } else if (order.Status === 'Delivered') {
+            badgeColor = 'bg-green-100 text-green-800 border-green-200';
+            badgeLabel = '✅ ส่งของสำเร็จ';
+        } else if (order.Status === 'ยกเลิก/ของหมด') {
+            badgeColor = 'bg-red-100 text-red-800 border-red-200';
+            badgeLabel = '❌ ยกเลิก/ของหมด';
+        }
+
+        // 2. Primary Action Button for active orders
+        let actionBtnHtml = '';
+        let quickDropdownHtml = '';
+
+        if (currentTab === 'active') {
+            if (!order.Status || order.Status === 'New' || order.Status === 'กำลังจัดหา') {
+                if (!order.ItemsPhoto) {
+                    actionBtnHtml = `
+                        <button onclick="openItemsPhotoModal('${order.OrderID}')" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2">
+                            <i class="fa-solid fa-camera"></i> จัดเสร็จแล้ว (ใส่รูปสินค้า)
+                        </button>
+                    `;
+                } else {
+                    actionBtnHtml = `
+                        <button onclick="requestPaymentFor('${order.OrderID}')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> เรียกเก็บเงิน
+                        </button>
+                    `;
+                }
+            } else if (order.Status === 'รอชำระเงิน') {
+                actionBtnHtml = `
+                    <button onclick="changeStatusDirect('${order.OrderID}', 'กำลังไปส่ง')" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2">
+                        <i class="fa-solid fa-motorcycle"></i> ไปส่งของเลย
+                    </button>
+                `;
+            } else if (order.Status === 'รอตรวจสอบยอด') {
+                actionBtnHtml = `
+                    <button onclick="changeStatusDirect('${order.OrderID}', 'กำลังไปส่ง')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2 animate-pulse">
+                        <i class="fa-solid fa-motorcycle"></i> ยอดถูกต้อง ไปส่ง
+                    </button>
+                `;
+            } else if (order.Status === 'กำลังไปส่ง' || order.Status === 'กำลังจัดส่ง') {
+                if (!order.DeliveryPhoto) {
+                    actionBtnHtml = `
+                        <button onclick="openUploadModal('${order.OrderID}')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2">
+                            <i class="fa-solid fa-camera"></i> ถ่ายรูปส่งสำเร็จ
+                        </button>
+                    `;
+                } else {
+                    actionBtnHtml = `
+                        <button onclick="changeStatusDirect('${order.OrderID}', 'Delivered')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-2 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5 mt-2">
+                            <i class="fa-solid fa-check"></i> ส่งสำเร็จแล้ว (จบงาน)
+                        </button>
+                    `;
+                }
+            }
+
+            quickDropdownHtml = `
+                <div class="mt-2">
+                    <select onchange="changeStatusDirect('${order.OrderID}', this.value); this.selectedIndex=0;" class="w-full p-1.5 bg-white border border-gray-300 rounded-lg text-[11px] font-semibold text-gray-700 hover:border-green-500 focus:ring-1 focus:ring-green-500 outline-none cursor-pointer shadow-sm">
+                        <option value="" disabled selected>⚙️ เปลี่ยนสถานะอื่น...</option>
+                        <option value="กำลังจัดหา">🛒 กำลังจัดหา</option>
+                        <option value="รอชำระเงิน">⏳ รอชำระเงิน</option>
+                        <option value="รอตรวจสอบยอด">🧾 รอตรวจสอบยอด</option>
+                        <option value="กำลังไปส่ง">🛵 กำลังไปส่ง</option>
+                        <option value="Delivered">✅ ส่งของแล้ว</option>
+                        <option value="ยกเลิก/ของหมด">❌ ยกเลิกออเดอร์</option>
+                    </select>
+                </div>
+            `;
+        }
+
         let statusHtml = `
-            <select data-original-status="${order.Status}" onchange="handleStatusChange(this, '${order.OrderID}')" class="w-full mb-2 p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold focus:ring-2 focus:ring-green-500 outline-none text-gray-700">
-                <option value="กำลังจัดหา" ${(!order.Status || order.Status === 'New' || order.Status === 'กำลังจัดหา') ? 'selected' : ''}>🛒 กำลังจัดหา</option>
-                <option value="รอชำระเงิน" ${order.Status === 'รอชำระเงิน' ? 'selected' : ''}>⏳ รอชำระเงิน</option>
-                <option value="รอตรวจสอบยอด" ${order.Status === 'รอตรวจสอบยอด' ? 'selected' : ''}>🧾 รอตรวจสอบยอด</option>
-                <option value="กำลังไปส่ง" ${order.Status === 'กำลังไปส่ง' ? 'selected' : ''}>🛵 กำลังไปส่ง</option>
-                <option value="Delivered" ${order.Status === 'Delivered' ? 'selected' : ''}>✅ ส่งของแล้ว</option>
-                <option value="ยกเลิก/ของหมด" ${order.Status === 'ยกเลิก/ของหมด' ? 'selected' : ''}>❌ ยกเลิก/ของหมด</option>
-            </select>
+            <div class="space-y-1">
+                <span class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm w-full ${badgeColor}">
+                    ${badgeLabel}
+                </span>
+                ${actionBtnHtml}
+                ${quickDropdownHtml}
+            </div>
         `;
         
         statusHtml += `<div class="text-center space-y-2 mt-3 border-t border-gray-100 pt-2">`;
@@ -498,25 +780,45 @@ function renderOrders() {
                 </div>
             `;
         }
+        if (order.ItemsPhoto) {
+            const thumbUrl = processDriveUrl(order.ItemsPhoto);
+            statusHtml += `
+                <div class="mb-2">
+                    <span class="block text-[10px] text-amber-700 font-bold mb-1"><i class="fa-solid fa-basket-shopping text-amber-500"></i> รูปของที่จัดเสร็จ</span>
+                    <div onclick="viewFullImage('${thumbUrl}', '🛍️ รูปของที่จัดเสร็จ (ออเดอร์: ${order.OrderID})')" class="block border-2 border-amber-200 rounded-lg overflow-hidden hover:border-amber-400 transition hover:shadow-md cursor-pointer relative group">
+                        <img src="${thumbUrl}" loading="lazy" class="w-full h-24 object-contain bg-amber-50/20" alt="Items Photo">
+                        <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <span class="bg-black/75 text-white text-[10px] font-bold py-1 px-2 rounded-full"><i class="fa-solid fa-expand"></i> ดูรูปใหญ่</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
         if (order.Slip) {
             const thumbUrl = processDriveUrl(order.Slip);
             statusHtml += `
                 <div class="mb-2">
-                    <span class="block text-[10px] text-gray-500 font-bold mb-1"><i class="fa-solid fa-receipt"></i> สลิปโอนเงินลูกค้า</span>
-                    <a href="${thumbUrl}" target="_blank" class="block border-2 border-orange-200 rounded-lg overflow-hidden hover:border-orange-400 transition hover:shadow-md">
-                        <img src="${thumbUrl}" class="w-full h-24 object-cover object-top" alt="Slip">
-                    </a>
+                    <span class="block text-[10px] text-purple-700 font-bold mb-1"><i class="fa-solid fa-receipt text-purple-500"></i> สลิปโอนเงินลูกค้า</span>
+                    <div onclick="viewFullImage('${thumbUrl}', '🧾 สลิปโอนเงินลูกค้า (ออเดอร์: ${order.OrderID})')" class="block border-2 border-purple-200 rounded-lg overflow-hidden hover:border-purple-400 transition hover:shadow-md cursor-pointer relative group">
+                        <img src="${thumbUrl}" loading="lazy" class="w-full h-24 object-contain bg-purple-50/20" alt="Slip">
+                        <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <span class="bg-black/75 text-white text-[10px] font-bold py-1 px-2 rounded-full"><i class="fa-solid fa-expand"></i> ดูรูปใหญ่</span>
+                        </div>
+                    </div>
                 </div>
             `;
         }
-        if (order.Status === 'Delivered' && order.DeliveryPhoto) {
+        if (order.DeliveryPhoto) {
             const thumbUrl = processDriveUrl(order.DeliveryPhoto);
             statusHtml += `
                 <div class="mb-2">
-                    <span class="block text-[10px] text-gray-500 font-bold mb-1"><i class="fa-solid fa-image"></i> รูปตอนส่งของ</span>
-                    <a href="${thumbUrl}" target="_blank" class="block border-2 border-blue-200 rounded-lg overflow-hidden hover:border-blue-400 transition hover:shadow-md">
-                        <img src="${thumbUrl}" class="w-full h-20 object-cover object-center" alt="Delivery Photo">
-                    </a>
+                    <span class="block text-[10px] text-emerald-700 font-bold mb-1"><i class="fa-solid fa-image text-emerald-500"></i> รูปตอนส่งของ</span>
+                    <div onclick="viewFullImage('${thumbUrl}', '🛵 รูปตอนส่งของ (ออเดอร์: ${order.OrderID})')" class="block border-2 border-emerald-200 rounded-lg overflow-hidden hover:border-emerald-400 transition hover:shadow-md cursor-pointer relative group">
+                        <img src="${thumbUrl}" loading="lazy" class="w-full h-20 object-contain bg-emerald-50/20" alt="Delivery Photo">
+                        <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <span class="bg-black/75 text-white text-[10px] font-bold py-1 px-2 rounded-full"><i class="fa-solid fa-expand"></i> ดูรูปใหญ่</span>
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -538,7 +840,7 @@ function renderOrders() {
                 ${locationHtml}
             </td>
             <td class="py-4 px-4 align-top">${itemsHtml}</td>
-            <td class="py-4 px-4 align-top w-32">
+            <td class="py-4 px-4 align-top w-48 min-w-[190px]">
                 ${statusHtml}
             </td>
         `;
@@ -547,12 +849,38 @@ function renderOrders() {
 }
 
 function toggleChecklist(checkbox) {
-    const itemNameSpan = checkbox.nextElementSibling.querySelector('.item-name');
-    if (checkbox.checked) {
-        itemNameSpan.classList.add('checklist-done');
-    } else {
-        itemNameSpan.classList.remove('checklist-done');
+    const label = checkbox.closest('label') || checkbox.parentElement;
+    const itemDiv = label.closest('div.flex') || label.parentElement;
+    const itemNameSpan = itemDiv.querySelector('.item-name');
+    if (itemNameSpan) {
+        if (checkbox.checked) {
+            itemNameSpan.classList.add('checklist-done');
+        } else {
+            itemNameSpan.classList.remove('checklist-done');
+        }
     }
+    // Save to localStorage so it persists across refresh
+    try {
+        localStorage.setItem('chk_' + checkbox.id, checkbox.checked ? '1' : '0');
+    } catch(e) {}
+}
+
+// Restore checkbox states after render
+function restoreChecklistStates() {
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('chk_')) {
+                const el = document.getElementById(key.substring(4));
+                if (el && localStorage.getItem(key) === '1') {
+                    el.checked = true;
+                    const itemDiv = el.closest('label')?.closest('div.flex') || el.parentElement?.parentElement;
+                    const span = itemDiv?.querySelector('.item-name');
+                    if (span) span.classList.add('checklist-done');
+                }
+            }
+        }
+    } catch(e) {}
 }
 
 function showError(message) {
@@ -564,6 +892,14 @@ function showError(message) {
 // Upload Modal Logic
 function openUploadModal(orderId) {
     currentOrderId.value = orderId;
+    const order = allOrders.find(o => o.OrderID === orderId);
+    if (order && order.DeliveryPhoto) {
+        deliveryPreview.src = processDriveUrl(order.DeliveryPhoto);
+        deliveryPreviewContainer.classList.remove('hidden');
+        deliveryBase64 = null;
+    } else {
+        removeDeliveryImage();
+    }
     uploadModal.classList.remove('hidden');
 }
 
@@ -636,52 +972,73 @@ function toggleOOS(orderId, idx, checkbox) {
 
 uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!deliveryBase64) {
-        alert('กรุณาแนบรูปภาพตอนส่งของ');
-        return;
-    }
-
     const orderId = currentOrderId.value;
     const originalBtnText = confirmDeliveryBtn.innerHTML;
-    confirmDeliveryBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังอัปโหลด...';
+    confirmDeliveryBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังบันทึก...';
     confirmDeliveryBtn.disabled = true;
 
+    // 1. INSTANT UI UPDATE
+    const order = allOrders.find(o => o.OrderID === orderId);
+    if (order) {
+        order.Status = 'Delivered';
+        if (deliveryBase64) {
+            order.DeliveryPhoto = deliveryBase64;
+            try { localStorage.setItem('localDeliveryPhoto_' + orderId, deliveryBase64); } catch(e) {}
+        }
+    }
+    closeUploadModal();
+    renderOrders();
+    showAlert('สำเร็จ', 'บันทึกสถานะส่งของเรียบร้อยแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
+
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(e) {}
+
+    // 2. Persist in background
     try {
         const payload = {
             action: 'updateStatus',
             orderId: orderId,
-            status: 'Delivered',
-            deliveryPhotoBase64: deliveryBase64
+            status: 'Delivered'
         };
+        if (deliveryBase64) payload.deliveryPhotoBase64 = deliveryBase64;
 
-        const response = await fetch(SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            closeUploadModal();
-            showAlert('สำเร็จ', 'อัปเดตสถานะการส่งและแนบรูปเรียบร้อยแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
-            fetchOrders(); // Refresh table
-        } else {
-            alert('เกิดข้อผิดพลาด: ' + result.message);
+        const res = await robustPost(payload);
+        if (res && res.deliveryPhotoUrl && order) {
+            order.DeliveryPhoto = res.deliveryPhotoUrl;
+            try {
+                localStorage.removeItem('localDeliveryPhoto_' + orderId);
+                localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+            } catch(e) {}
+            renderOrders();
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('เกิดข้อผิดพลาดในการเชื่อมต่อ');
     } finally {
         confirmDeliveryBtn.innerHTML = originalBtnText;
         confirmDeliveryBtn.disabled = false;
     }
 });
 
-// --- Items Photo Modal Logic ---
+// --- Items Photo Modal Logic (รูปของที่จัดเสร็จ) ---
+function openItemsPhotoModal(orderId) {
+    const hiddenInput = document.getElementById('itemsPhotoOrderId');
+    if (hiddenInput) hiddenInput.value = orderId;
+
+    const order = allOrders.find(o => o.OrderID === orderId);
+    if (order && order.ItemsPhoto) {
+        document.getElementById('itemsPreview').src = processDriveUrl(order.ItemsPhoto);
+        document.getElementById('itemsPreviewContainer').classList.remove('hidden');
+        window.itemsPhotoBase64Data = null;
+    } else {
+        removeItemsImage();
+    }
+    document.getElementById('itemsPhotoModal').classList.remove('hidden');
+}
+
 function closeItemsPhotoModal() {
     document.getElementById('itemsPhotoModal').classList.add('hidden');
-    window.pendingSavePayload = null;
-    window.pendingSaveElements = null;
+    removeItemsImage();
 }
 
 document.getElementById('itemsImage').addEventListener('change', function(e) {
@@ -690,6 +1047,7 @@ document.getElementById('itemsImage').addEventListener('change', function(e) {
         if (file.size > 2 * 1024 * 1024) {
             alert('ขนาดไฟล์ต้องไม่เกิน 2MB');
             this.value = '';
+            removeItemsImage();
             return;
         }
         const reader = new FileReader();
@@ -699,39 +1057,120 @@ document.getElementById('itemsImage').addEventListener('change', function(e) {
             window.itemsPhotoBase64Data = e.target.result;
         };
         reader.readAsDataURL(file);
+    } else {
+        removeItemsImage();
     }
 });
 
 function removeItemsImage(e) {
-    e.stopPropagation();
-    document.getElementById('itemsImage').value = '';
-    document.getElementById('itemsPreviewContainer').classList.add('hidden');
-    document.getElementById('itemsPreview').src = '';
+    if (e) e.stopPropagation();
+    const input = document.getElementById('itemsImage');
+    if (input) input.value = '';
+    const container = document.getElementById('itemsPreviewContainer');
+    if (container) container.classList.add('hidden');
+    const preview = document.getElementById('itemsPreview');
+    if (preview) preview.src = '';
     window.itemsPhotoBase64Data = null;
 }
 
 document.getElementById('itemsPhotoForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!window.pendingSavePayload) return;
+    const orderId = document.getElementById('itemsPhotoOrderId').value;
+    if (!orderId) {
+        closeItemsPhotoModal();
+        return;
+    }
+
+    const order = allOrders.find(o => o.OrderID === orderId);
+
+    // Require photo if not already uploaded
+    if (!window.itemsPhotoBase64Data && (!order || !order.ItemsPhoto)) {
+        showAlert('แจ้งเตือน', 'กรุณาถ่ายรูปหรือเลือกรูปภาพก่อนบันทึกครับ', 'fa-image', 'text-yellow-600', 'bg-yellow-100');
+        return;
+    }
     
     const confirmBtn = document.getElementById('confirmItemsBtn');
     const originalText = confirmBtn.innerHTML;
     confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังบันทึก...';
     confirmBtn.disabled = true;
-    
-    if (window.itemsPhotoBase64Data) {
-        window.pendingSavePayload.itemsPhotoBase64 = window.itemsPhotoBase64Data;
+
+    // 1. Gather prices and calculate total
+    const feeInput = document.getElementById(`fee_${orderId}`);
+    const fee = feeInput ? (parseFloat(feeInput.value) || 20) : (order && order.DeliveryFee ? parseFloat(order.DeliveryFee) : 20);
+
+    let sum = 0;
+    const items = (window.orderItemsCache && window.orderItemsCache[orderId]) ? window.orderItemsCache[orderId] : [];
+    const priceInputs = document.querySelectorAll(`.item-price-${orderId}`);
+    priceInputs.forEach((input, index) => {
+        if (items[index]) {
+            items[index].price = input.value || '';
+            const oosCheckbox = document.getElementById(`oos_${orderId}_${index}`);
+            if (oosCheckbox) items[index].outOfStock = oosCheckbox.checked;
+            if (input.value && (!oosCheckbox || !oosCheckbox.checked)) {
+                sum += parseFloat(input.value) || 0;
+            }
+        }
+    });
+
+    const totalPrice = (sum + fee).toFixed(2);
+    const totalSpan = document.getElementById(`total_${orderId}`);
+    if (totalSpan) totalSpan.textContent = totalPrice;
+
+    // 2. INSTANT UI UPDATE
+    if (order) {
+        if (window.itemsPhotoBase64Data) {
+            order.ItemsPhoto = window.itemsPhotoBase64Data;
+            try { localStorage.setItem('localItemsPhoto_' + orderId, window.itemsPhotoBase64Data); } catch(e) {}
+        }
+        // Automatically advance to รอชำระเงิน as requested
+        if (!order.Status || order.Status === 'New' || order.Status === 'กำลังจัดหา' || order.Status === 'รอชำระเงิน') {
+            order.Status = 'รอชำระเงิน';
+        }
+        if (items.length > 0) order.Items = JSON.stringify(items);
+        
+        order.TotalPrice = totalPrice;
+        order.DeliveryFee = fee;
     }
-    
-    // Call doSavePrices
-    await doSavePrices(window.pendingSavePayload, window.pendingSaveElements.btn, window.pendingSaveElements.selectElement);
-    
-    confirmBtn.innerHTML = originalText;
-    confirmBtn.disabled = false;
-    
+
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(err) {}
+
     closeItemsPhotoModal();
-    showAlert('สำเร็จ', 'อัปเดตราคาและรูปสินค้าเรียบร้อยแล้ว!', 'fa-check', 'text-blue-600', 'bg-blue-100');
-    fetchOrders();
+    renderOrders();
+    showAlert('สำเร็จ', 'อัปโหลดรูปเสร็จแล้ว! เปลี่ยนสถานะเป็น "รอชำระเงิน" เรียบร้อย', 'fa-check', 'text-green-600', 'bg-green-100');
+
+    // 3. Persist to backend in background
+    try {
+        const payload = {
+            action: 'updateStatus',
+            orderId: orderId,
+            status: order ? order.Status : 'รอชำระเงิน',
+            deliveryFee: fee
+        };
+        if (window.itemsPhotoBase64Data) {
+            payload.itemsPhotoBase64 = window.itemsPhotoBase64Data;
+        }
+        if (items.length > 0) {
+            payload.itemsWithPrices = JSON.stringify(items);
+        }
+        payload.totalPrice = totalPrice;
+
+        const res = await robustPost(payload);
+        if (res && res.itemsPhotoUrl && order) {
+            order.ItemsPhoto = res.itemsPhotoUrl;
+            try {
+                localStorage.removeItem('localItemsPhoto_' + orderId);
+                localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+            } catch(e) {}
+            renderOrders();
+        }
+    } catch (error) {
+        console.error('Error uploading items photo and setting รอชำระเงิน:', error);
+    } finally {
+        confirmBtn.innerHTML = originalText;
+        confirmBtn.disabled = false;
+    }
 });
 
 function showAlert(title, message, iconClass, iconColorClass, iconBgClass) {
@@ -826,8 +1265,50 @@ function addNewEditItem() {
     renderEditItems();
 }
 
-function saveEditedOrder() {
+// Cancel order completely
+async function cancelEntireOrder(orderId = null) {
+    const targetOrderId = orderId || currentEditOrderId;
+    if (!targetOrderId) return;
+    
+    if (currentEditOrderId) closeEditOrderModal();
+    
+    // 1. INSTANT UI UPDATE: change status in memory immediately
+    const order = allOrders.find(o => o.OrderID === targetOrderId);
+    if (order) {
+        order.Status = 'ยกเลิก/ของหมด';
+    }
+    
+    // 2. Instantly re-render (it disappears from "รอดำเนินการ" immediately!)
+    renderOrders();
+    showAlert('ยกเลิกออเดอร์แล้ว', `ออเดอร์ ${targetOrderId} ถูกยกเลิกเรียบร้อยแล้ว`, 'fa-check', 'text-green-600', 'bg-green-100');
+    
+    // 3. Save to localStorage
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(e) {}
+    
+    // 4. Save to backend in background
+    const payload = {
+        action: 'updateStatus',
+        orderId: targetOrderId,
+        status: 'ยกเลิก/ของหมด'
+    };
+    
+    try {
+        await robustPost(payload);
+    } catch(e) {
+        console.error('Failed to sync cancellation:', e);
+    }
+}
+
+async function saveEditedOrder() {
     if (!currentEditOrderId) return;
+    
+    // ถ้าลบออเดอร์ออกหมด → ยกเลิกออเดอร์อัตโนมัติ
+    if (currentEditItems.length === 0) {
+        await cancelEntireOrder(currentEditOrderId);
+        return;
+    }
     
     for (let i = 0; i < currentEditItems.length; i++) {
         if (!currentEditItems[i].Name.trim()) {
@@ -837,17 +1318,48 @@ function saveEditedOrder() {
     }
     
     const order = allOrders.find(o => o.OrderID === currentEditOrderId);
-    if (order) {
-        const feeInput = document.getElementById(`fee_${currentEditOrderId}`);
-        let currentFee = 20;
-        if (feeInput) currentFee = feeInput.value;
-        
-        order.Items = JSON.stringify(currentEditItems);
-        order.DeliveryFee = currentFee;
-        
-        renderOrders();
-        closeEditOrderModal();
-        alert("✏️ แก้ไขออเดอร์สำเร็จ!\n(อย่าลืมกดปุ่ม [บันทึก] สีฟ้า หรือเปลี่ยนสถานะ เพื่อเซฟลงระบบ)");
+    if (!order) return;
+    
+    const feeInput = document.getElementById(`fee_${currentEditOrderId}`);
+    let currentFee = feeInput ? parseFloat(feeInput.value) || 20 : 20;
+    
+    // Build payload with updated items (preserve price/outOfStock from current display)
+    const priceInputs = document.querySelectorAll(`.item-price-${currentEditOrderId}`);
+    currentEditItems.forEach((item, i) => {
+        if (priceInputs[i]) item.price = priceInputs[i].value || item.price || '';
+        const oosEl = document.getElementById(`oos_${currentEditOrderId}_${i}`);
+        if (oosEl) item.outOfStock = oosEl.checked;
+    });
+    
+    const saveBtn = document.getElementById('saveEditedOrderBtn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังบันทึก...'; }
+    
+    // 1. INSTANT UI UPDATE
+    order.Items = JSON.stringify(currentEditItems);
+    order.DeliveryFee = currentFee;
+    closeEditOrderModal();
+    renderOrders();
+    showAlert('บันทึกสำเร็จ', 'แก้ไขรายการออเดอร์เรียบร้อยแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
+    
+    // 2. Save to localStorage
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(e) {}
+    
+    // 3. Persist to backend
+    const payload = {
+        action: 'updateStatus',
+        orderId: currentEditOrderId,
+        itemsWithPrices: JSON.stringify(currentEditItems),
+        deliveryFee: currentFee
+    };
+    
+    try {
+        await robustPost(payload);
+    } catch(e) {
+        console.error('Failed to sync edit:', e);
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fa-solid fa-save mr-1"></i> บันทึกการแก้ไข'; }
     }
 }
 
@@ -925,113 +1437,143 @@ async function savePrices(orderId, newStatus = null, selectElement = null) {
         payload.status = newStatus;
     }
 
-    if (newStatus === 'รอชำระเงิน') {
-        window.pendingSavePayload = payload;
-        window.pendingSaveElements = { btn: btn, selectElement: selectElement };
-        
-        document.getElementById('itemsPhotoForm').reset();
-        document.getElementById('itemsPreviewContainer').classList.add('hidden');
-        document.getElementById('itemsPreview').src = '';
-        window.itemsPhotoBase64Data = null;
-        
-        document.getElementById('itemsPhotoModal').classList.remove('hidden');
-        
-        if (btn) {
-            btn.innerHTML = btn.dataset.originalText;
-            btn.disabled = false;
-        }
-        if (selectElement) selectElement.disabled = false;
-        
-        return; // wait for modal submission
-    }
-    
     await doSavePrices(payload, btn, selectElement);
 }
 
 async function doSavePrices(payload, btn, selectElement) {
+    // 1. INSTANT UI UPDATE
+    const order = allOrders.find(o => o.OrderID === payload.orderId);
+    if (order) {
+        if (payload.status) order.Status = payload.status;
+        if (payload.itemsWithPrices) order.Items = payload.itemsWithPrices;
+        if (payload.totalPrice !== undefined) order.TotalPrice = payload.totalPrice;
+        if (payload.deliveryFee !== undefined) order.DeliveryFee = payload.deliveryFee;
+        
+        try {
+            localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+        } catch(e) {}
+
+        if (payload.status === 'Delivered' || payload.status === 'ยกเลิก/ของหมด') {
+            renderOrders();
+        }
+    }
+
+    if (selectElement) {
+        selectElement.dataset.originalStatus = payload.status;
+        selectElement.disabled = false;
+        selectElement.style.backgroundColor = '#d1fae5';
+        setTimeout(() => { selectElement.style.backgroundColor = ''; }, 1000);
+    }
+    
+    if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.classList.replace('bg-blue-500', 'bg-green-500');
+        setTimeout(() => {
+            btn.innerHTML = btn.dataset.originalText;
+            btn.classList.replace('bg-green-500', 'bg-blue-500');
+            btn.disabled = false;
+        }, 1500);
+    }
+
+    // 2. Persist to backend
     try {
-        await fetch(SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-        
-        if (selectElement) {
-            selectElement.dataset.originalStatus = payload.status;
-            selectElement.disabled = false;
-            selectElement.style.backgroundColor = '#d1fae5';
-            setTimeout(() => { selectElement.style.backgroundColor = ''; }, 1000);
-        }
-        
-        if (btn) {
-            btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-            btn.classList.replace('bg-blue-500', 'bg-green-500');
-            setTimeout(() => {
-                btn.innerHTML = btn.dataset.originalText;
-                btn.classList.replace('bg-green-500', 'bg-blue-500');
-                btn.disabled = false;
-            }, 1500);
-        }
+        await robustPost(payload);
     } catch (e) {
-        // Handle CORS error smoothly (it actually succeeds on GAS)
-        if (selectElement) {
-            selectElement.dataset.originalStatus = payload.status;
-            selectElement.disabled = false;
-            selectElement.style.backgroundColor = '#d1fae5';
-            setTimeout(() => { selectElement.style.backgroundColor = ''; }, 1000);
-        }
-        if (btn) {
-            btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-            btn.classList.replace('bg-blue-500', 'bg-green-500');
-            setTimeout(() => {
-                btn.innerHTML = btn.dataset.originalText;
-                btn.classList.replace('bg-green-500', 'bg-blue-500');
-                btn.disabled = false;
-            }, 1500);
-        }
+        console.error('Save error:', e);
     }
 }
 
-// Handle status change from select dropdown
-function handleStatusChange(selectElement, orderId) {
-    const newStatus = selectElement.value;
-    const originalStatus = selectElement.dataset.originalStatus || 'กำลังจัดหา';
-
-    if (newStatus === 'รอชำระเงิน') {
-        const priceInputs = document.querySelectorAll(`.item-price-${orderId}`);
-        let allFilled = true;
-        priceInputs.forEach((input, index) => {
-            const oosCheckbox = document.getElementById(`oos_${orderId}_${index}`);
-            if (!input.value && !(oosCheckbox && oosCheckbox.checked)) {
-                allFilled = false;
-            }
-        });
-        
-        if (!allFilled) {
-            alert('กรุณากรอกราคาสินค้าให้ครบทุกชิ้นก่อนเรียกเก็บเงินครับ');
-            selectElement.value = originalStatus;
-            return;
-        }
-        
-        // Save prices and update status directly (QR code is fixed on customer side)
-        savePrices(orderId, 'รอชำระเงิน', selectElement);
-    } 
-    else if (newStatus === 'Delivered') {
-        selectElement.value = originalStatus;
-        openUploadModal(orderId);
-    } 
-    else if (newStatus === 'กำลังจัดส่ง') {
-        const eta = prompt('โปรดระบุเวลาที่คาดว่าจะถึง (เช่น 10 นาที, 15 นาที):', '10 นาที');
-        if (eta !== null) {
-            // we must pass eta to savePrices. Let's add eta parameter or pass it globally.
-            window.currentEta = eta.trim();
-            savePrices(orderId, newStatus, selectElement);
-        } else {
-            selectElement.value = originalStatus; // cancelled
-        }
+// Request payment (calculate total, update status to รอชำระเงิน)
+async function requestPaymentFor(orderId) {
+    const order = allOrders.find(o => o.OrderID === orderId);
+    // ถ้ายังไม่ได้ใส่รูปของที่จัดเสร็จ ให้เปิดหน้าต่างถ่ายรูปทันที
+    if (order && !order.ItemsPhoto && !localStorage.getItem('localItemsPhoto_' + orderId)) {
+        openItemsPhotoModal(orderId);
+        return;
     }
-    else {
-        // Just status update
-        savePrices(orderId, newStatus, selectElement);
+
+    const feeInput = document.getElementById(`fee_${orderId}`);
+    const fee = feeInput ? (parseFloat(feeInput.value) || 20) : 20;
+    
+    // Gather prices
+    let sum = 0;
+    const items = (window.orderItemsCache && window.orderItemsCache[orderId]) ? window.orderItemsCache[orderId] : [];
+    const priceInputs = document.querySelectorAll(`.item-price-${orderId}`);
+    priceInputs.forEach((input, index) => {
+        if (items[index]) {
+            items[index].price = input.value || '';
+            const oosCheckbox = document.getElementById(`oos_${orderId}_${index}`);
+            if (oosCheckbox) items[index].outOfStock = oosCheckbox.checked;
+            if (input.value && (!oosCheckbox || !oosCheckbox.checked)) {
+                sum += parseFloat(input.value) || 0;
+            }
+        }
+    });
+
+    const totalPrice = (sum + fee).toFixed(2);
+    const totalSpan = document.getElementById(`total_${orderId}`);
+    if (totalSpan) totalSpan.textContent = totalPrice;
+
+    // Direct update to รอชำระเงิน
+    await changeStatusDirect(orderId, 'รอชำระเงิน', {
+        itemsWithPrices: JSON.stringify(items),
+        totalPrice: totalPrice,
+        deliveryFee: fee
+    });
+}
+
+// Direct Status Change (Fast, robust, intuitive, no blocking)
+async function changeStatusDirect(orderId, newStatus, extraPayload = {}) {
+    if (!orderId || !newStatus) return;
+    const order = allOrders.find(o => o.OrderID === orderId);
+    if (!order) return;
+
+    // ถ้ากดเปลี่ยนเป็น Delivered แล้วยังไม่ได้ถ่ายรูปส่งของ ให้เปิดหน้าต่างถ่ายรูปส่งของก่อน
+    if (newStatus === 'Delivered' && (!order.DeliveryPhoto && !localStorage.getItem('localDeliveryPhoto_' + orderId))) {
+        openUploadModal(orderId);
+        return;
+    }
+
+    let eta = null;
+
+    // 1. INSTANT UI UPDATE
+    order.Status = newStatus;
+    if (extraPayload.itemsWithPrices) order.Items = extraPayload.itemsWithPrices;
+    if (extraPayload.totalPrice !== undefined) order.TotalPrice = extraPayload.totalPrice;
+    if (extraPayload.deliveryFee !== undefined) order.DeliveryFee = extraPayload.deliveryFee;
+    if (eta) order.ETA = eta;
+
+    // Render immediately! If delivered or canceled, it moves to history tab right away!
+    renderOrders();
+
+    const statusNames = {
+        'กำลังจัดหา': '🛒 กำลังจัดหา',
+        'รอชำระเงิน': '⏳ รอชำระเงิน (แจ้งยอดแล้ว)',
+        'รอตรวจสอบยอด': '🧾 รอตรวจสอบยอด',
+        'กำลังไปส่ง': '🛵 กำลังไปส่ง',
+        'Delivered': '✅ ส่งของสำเร็จแล้ว',
+        'ยกเลิก/ของหมด': '❌ ยกเลิกออเดอร์แล้ว'
+    };
+    showAlert('อัปเดตสถานะแล้ว', `ออเดอร์ ${orderId} เปลี่ยนเป็น: ${statusNames[newStatus] || newStatus}`, 'fa-check', 'text-green-600', 'bg-green-100');
+
+    // 2. Save to localStorage
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(e) {}
+
+    // 3. Persist to backend
+    const payload = {
+        action: 'updateStatus',
+        orderId: orderId,
+        status: newStatus,
+        ...extraPayload
+    };
+    if (eta) payload.eta = eta;
+
+    try {
+        await robustPost(payload);
+    } catch(e) {
+        console.error('Failed to sync status update:', e);
     }
 }
 
@@ -1155,3 +1697,59 @@ document.getElementById('paymentForm').addEventListener('submit', async (e) => {
     };
     reader.readAsDataURL(file);
 });
+
+// Fullscreen Lightbox Image Viewer
+function viewFullImage(imgUrl, title = 'รูปภาพ') {
+    if (!imgUrl) return;
+    const modal = document.getElementById('imageViewerModal');
+    const img = document.getElementById('imageViewerImg');
+    const titleEl = document.getElementById('imageViewerTitle');
+    if (modal && img) {
+        img.src = imgUrl;
+        if (titleEl) titleEl.textContent = title;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeImageViewer() {
+    const modal = document.getElementById('imageViewerModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        const img = document.getElementById('imageViewerImg');
+        if (img) img.src = '';
+        document.body.style.overflow = '';
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeImageViewer();
+});
+
+
+async function deleteOrder(orderId) {
+    if (!confirm('ยืนยันที่จะลบออเดอร์ ' + orderId + ' ใช่หรือไม่? (ลบแล้วกู้คืนไม่ได้)')) return;
+    
+    // 1. INSTANT UI UPDATE
+    allOrders = allOrders.filter(o => o.OrderID !== orderId);
+    renderOrders();
+    
+    try {
+        localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
+    } catch(err) {}
+
+    // 2. BACKGROUND SYNC
+    try {
+        const payload = { action: 'deleteOrder', orderId: orderId };
+        const res = await robustPost(payload);
+        if (res && res.status === 'success') {
+            showAlert('ลบสำเร็จ', 'ลบออเดอร์เรียบร้อยแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
+        } else {
+            showAlert('เกิดข้อผิดพลาด', res.message || 'ไม่สามารถลบออเดอร์ได้', 'fa-xmark', 'text-red-600', 'bg-red-100');
+            fetchOrders(true); // reload to get correct state
+        }
+    } catch (error) {
+        showAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อกับระบบได้', 'fa-xmark', 'text-red-600', 'bg-red-100');
+        fetchOrders(true);
+    }
+}

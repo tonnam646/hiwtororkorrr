@@ -164,10 +164,11 @@
     </div>
 
     <!-- Upload Photo Modal -->
+    <!-- Upload Delivery Photo Modal -->
     <div id="uploadModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 backdrop-blur-sm">
         <div class="bg-white p-6 rounded-2xl shadow-2xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <h3 class="text-xl font-bold text-gray-900 mb-2"><i class="fa-solid fa-camera text-green-500 mr-2"></i>อัปเดตสถานะการส่ง</h3>
-            <p class="text-gray-500 text-sm mb-4">แนบรูปภาพหลักฐานการวางของเพื่อให้ลูกค้าตรวจสอบ</p>
+            <h3 class="text-xl font-bold text-gray-900 mb-2"><i class="fa-solid fa-camera text-green-500 mr-2"></i>ถ่ายรูปตอนส่งของ</h3>
+            <p class="text-gray-500 text-sm mb-4">ถ่ายรูปของที่วางส่ง หรือรูปหน้าหอพัก เพื่อแจ้งลูกค้าว่าส่งเสร็จแล้ว</p>
             
             <form id="uploadForm" class="space-y-4">
                 <input type="hidden" id="currentOrderId">
@@ -175,9 +176,9 @@
                 <div>
                     <div class="relative border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('deliveryImage').click()">
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-gray-400 mb-2"></i>
-                        <p class="text-sm text-gray-500 font-medium">คลิกเพื่ออัปโหลดรูปตอนส่งของ</p>
+                        <p class="text-sm text-gray-600 font-bold">คลิกเพื่อถ่ายรูป / เลือกรูปตอนส่งของ</p>
                         <p class="text-xs text-gray-400 mt-1">ไฟล์รูปภาพขนาดไม่เกิน 2MB</p>
-                        <input type="file" id="deliveryImage" accept="image/*" class="hidden" required>
+                        <input type="file" id="deliveryImage" accept="image/*" class="hidden">
                     </div>
                     <div id="deliveryPreviewContainer" class="mt-3 hidden relative text-center">
                         <img src="" id="deliveryPreview" class="h-40 object-cover rounded-xl border border-gray-200 inline-block">
@@ -188,9 +189,9 @@
                 </div>
 
                 <div class="flex gap-3 pt-2 border-t">
-                    <button type="button" onclick="closeUploadModal()" class="w-1/3 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition">ยกเลิก</button>
+                    <button type="button" onclick="closeUploadModal()" class="w-1/3 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition">ปิด</button>
                     <button type="submit" id="confirmDeliveryBtn" class="w-2/3 bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition shadow flex justify-center items-center">
-                        <i class="fa-solid fa-check mr-2"></i> ยืนยันการส่งของ
+                        <i class="fa-solid fa-cloud-arrow-up mr-2"></i> บันทึกรูปตอนส่ง
                     </button>
                 </div>
             </form>
@@ -200,8 +201,8 @@
     <!-- Items Photo Modal -->
     <div id="itemsPhotoModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 backdrop-blur-sm">
         <div class="bg-white p-6 rounded-2xl shadow-2xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <h3 class="text-xl font-bold text-gray-900 mb-2"><i class="fa-solid fa-basket-shopping text-blue-500 mr-2"></i>อัปเดต: รอชำระเงิน</h3>
-            <p class="text-gray-500 text-sm mb-4">แนบรูปภาพสินค้าที่จัดหาได้ เพื่อให้ลูกค้าตรวจสอบก่อนโอนเงิน</p>
+            <h3 class="text-xl font-bold text-gray-900 mb-2"><i class="fa-solid fa-camera text-blue-500 mr-2"></i>ถ่ายรูปของที่จัดเสร็จ</h3>
+            <p class="text-gray-500 text-sm mb-4">ถ่ายรูปสินค้าหรือตะกร้าของ เพื่อให้ลูกค้าตรวจสอบก่อนโอนเงิน</p>
             
             <form id="itemsPhotoForm" class="space-y-4">
                 <input type="hidden" id="itemsPhotoOrderId">
@@ -209,8 +210,8 @@
                 <div>
                     <div class="relative border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('itemsImage').click()">
                         <i class="fa-solid fa-image text-4xl text-gray-400 mb-2"></i>
-                        <p class="text-sm text-gray-500 font-medium">คลิกเพื่ออัปโหลดรูปตะกร้าสินค้า</p>
-                        <p class="text-xs text-gray-400 mt-1">ไฟล์รูปภาพขนาดไม่เกิน 2MB (เลือกใส่หรือไม่ใส่ก็ได้)</p>
+                        <p class="text-sm text-gray-600 font-bold">คลิกเพื่อถ่ายรูป / เลือกรูปของที่จัดเสร็จ</p>
+                        <p class="text-xs text-gray-400 mt-1">ไฟล์รูปภาพขนาดไม่เกิน 2MB</p>
                         <input type="file" id="itemsImage" accept="image/*" class="hidden">
                     </div>
                     <div id="itemsPreviewContainer" class="mt-3 hidden relative text-center">
@@ -222,9 +223,9 @@
                 </div>
 
                 <div class="flex gap-3 pt-2 border-t">
-                    <button type="button" onclick="closeItemsPhotoModal()" class="w-1/3 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition">ยกเลิก</button>
-                    <button type="submit" id="confirmItemsBtn" class="w-2/3 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow flex justify-center items-center">
-                        <i class="fa-solid fa-paper-plane mr-2"></i> เรียกเก็บเงิน
+                    <button type="button" onclick="closeItemsPhotoModal()" class="w-1/3 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition">ปิด</button>
+                    <button type="submit" id="confirmItemsBtn" class="w-2/3 bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition shadow flex justify-center items-center">
+                        <i class="fa-solid fa-cloud-arrow-up mr-2"></i> บันทึกรูป & เป็นรอชำระเงิน
                     </button>
                 </div>
             </form>
@@ -245,9 +246,12 @@
                 <i class="fa-solid fa-plus mr-2"></i> เพิ่มรายการสินค้าใหม่
             </button>
 
-            <div class="flex gap-3 pt-4 border-t border-gray-200">
-                <button type="button" onclick="closeEditOrderModal()" class="w-1/3 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition">ยกเลิก</button>
-                <button type="button" onclick="saveEditedOrder()" id="saveEditedOrderBtn" class="w-2/3 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow flex justify-center items-center">
+            <div class="flex gap-2 pt-4 border-t border-gray-200">
+                <button type="button" onclick="cancelEntireOrder()" class="bg-red-50 text-red-600 font-bold py-3 px-3 rounded-xl hover:bg-red-100 transition border border-red-200 text-xs flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-trash-can"></i> ยกเลิกออเดอร์นี้
+                </button>
+                <button type="button" onclick="closeEditOrderModal()" class="w-1/4 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-200 transition text-sm">ปิด</button>
+                <button type="button" onclick="saveEditedOrder()" id="saveEditedOrderBtn" class="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow flex justify-center items-center text-sm">
                     <i class="fa-solid fa-save mr-2"></i> บันทึกการแก้ไข
                 </button>
             </div>
@@ -265,6 +269,24 @@
         </div>
     </div>
 
-    <script src="admin.js?v=21"></script>
+    <!-- Fullscreen Image Viewer Modal (Lightbox) -->
+    <div id="imageViewerModal" class="fixed inset-0 bg-black/90 hidden flex flex-col items-center justify-center z-50 p-4 backdrop-blur-md transition-all duration-300" onclick="closeImageViewer()">
+        <div class="relative max-w-3xl w-full max-h-[90vh] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+            <!-- Close Button -->
+            <button onclick="closeImageViewer()" class="absolute -top-12 right-0 bg-white/20 hover:bg-white/40 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl transition shadow-lg backdrop-blur-sm cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            
+            <!-- Caption -->
+            <div id="imageViewerTitle" class="text-white text-sm font-bold mb-3 drop-shadow-md text-center"></div>
+
+            <!-- Full Image -->
+            <img id="imageViewerImg" src="" alt="ภาพขยาย" class="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10 select-none bg-black/30">
+            
+            <p class="text-white/70 text-xs mt-3 bg-black/40 px-3 py-1 rounded-full"><i class="fa-solid fa-hand-pointer mr-1"></i> แตะที่ใดก็ได้หรือกดกากบาทเพื่อปิด</p>
+        </div>
+    </div>
+
+    <script src="admin.js?v=39"></script>
 </body>
 </html>
