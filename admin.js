@@ -1,6 +1,46 @@
-﻿// *** IMPORTANT ***
+// *** IMPORTANT ***
 // คุณต้องนำ URL ของ Web App ที่ได้จาก Google Apps Script มาใส่ตรงนี้ (ต้องเป็น URL เดียวกับใน script.js)
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzLk2fmojtjc8upkQmYp-d7tbgaQVJw1moBGSpLWYiYd-MQ18WI-c8zYfRc4qI45vVQ/exec';
+
+function compressImage(file, callback) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            const max_dim = 800;
+
+            if (width > height) {
+                if (width > max_dim) {
+                    height = Math.round(height *= max_dim / width);
+                    width = max_dim;
+                }
+            } else {
+                if (height > max_dim) {
+                    width = Math.round(width *= max_dim / height);
+                    height = max_dim;
+                }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            // เติมพื้นหลังสีขาวเพื่อป้องกันพื้นหลังโปร่งใส (PNG) กลายเป็นสีดำเมื่อแปลงเป็น JPEG
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // แปลงเป็น JPEG quality 60%
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+            callback(dataUrl);
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
 
 const loginScreen = document.getElementById('loginScreen');
 const adminApp = document.getElementById('adminApp');
@@ -43,32 +83,63 @@ let lastDataFingerprint = '';
 let pendingNewOrders = [];
 
 // Login Logic
-loginForm.addEventListener('submit', (e) => {
+loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (passwordInput.value === '66040114545') {
-        loginScreen.classList.add('hidden');
-        adminApp.classList.remove('hidden');
-        requestNotificationPermission();
+    
+    const submitBtn = loginForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>กำลังตรวจสอบ...';
+    submitBtn.disabled = true;
+    loginError.classList.add('hidden');
 
-        // 1. Instant render from local cache (0ms wait!)
-        try {
-            const cached = localStorage.getItem('adminCachedOrders');
-            if (cached) {
-                const parsed = JSON.parse(cached);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    allOrders = parsed;
-                    allOrders.forEach(o => knownOrderIds.add(o.OrderID));
-                    renderOrders();
+    try {
+        const payload = {
+            action: 'checkPassword',
+            password: passwordInput.value
+        };
+        
+        const res = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await res.json();
+        
+        if (data && data.status === 'success') {
+            localStorage.setItem('adminLoggedIn', 'true');
+            document.cookie = "adminLoggedIn=true; max-age=86400; path=/";
+            loginScreen.classList.add('hidden');
+            adminApp.classList.remove('hidden');
+            requestNotificationPermission();
+
+            // 1. Instant render from local cache (0ms wait!)
+            try {
+                const cached = localStorage.getItem('adminCachedOrders');
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        allOrders = parsed;
+                        allOrders.forEach(o => knownOrderIds.add(o.OrderID));
+                        renderOrders();
+                    }
                 }
-            }
-        } catch(e) {}
+            } catch(e) {}
 
-        // 2. Fetch fresh data in background
-        fetchOrders(allOrders.length > 0);
-        startPolling();
-    } else {
+            // 2. Fetch fresh data in background
+            fetchOrders(allOrders.length > 0);
+            startPolling();
+        } else {
+            loginError.textContent = 'รหัสผ่านไม่ถูกต้อง';
+            loginError.classList.remove('hidden');
+            passwordInput.value = '';
+        }
+    } catch (err) {
+        console.error('Login error:', err);
+        loginError.textContent = 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้';
         loginError.classList.remove('hidden');
-        passwordInput.value = '';
+    } finally {
+        submitBtn.innerHTML = originalBtnText;
+        submitBtn.disabled = false;
     }
 });
 
@@ -100,7 +171,7 @@ function fetchOrders(silent = false) {
             showError('โหลดข้อมูลนานเกินไป กรุณากดปุ่มรีเฟรชอีกครั้ง');
             loading.classList.add('hidden');
         }
-        scheduleNextAdminPoll(8000);
+        scheduleNextAdminPoll(15000);
     }, 25000);
     script.dataset.timeoutId = String(tid);
 
@@ -112,7 +183,7 @@ function fetchOrders(silent = false) {
             showError('ไม่สามารถเชื่อมต่อกับ Google Apps Script ได้');
             loading.classList.add('hidden');
         }
-        scheduleNextAdminPoll(8000);
+        scheduleNextAdminPoll(15000);
     };
 
     document.body.appendChild(script);
@@ -144,7 +215,7 @@ function handleOrdersResponse(data) {
     });
 
     // Schedule next silent poll 6 seconds AFTER current response is processed
-    scheduleNextAdminPoll(6000);
+    scheduleNextAdminPoll(15000);
 
     if (!Array.isArray(data)) {
         console.error('Data received is not an array:', data);
@@ -203,9 +274,23 @@ function handleOrdersResponse(data) {
             hasDeliveryPhoto: !!o.DeliveryPhoto 
         })));
         if (fingerprint !== lastDataFingerprint || isInitialLoad) {
-            lastDataFingerprint = fingerprint;
-            allOrders = incoming;
-            renderOrders();
+            if (!isInitialLoad) {
+                pendingNewOrders = incoming;
+                let banner = document.getElementById('newOrderBanner');
+                if (!banner) {
+                    banner = document.createElement('div');
+                    banner.id = 'newOrderBanner';
+                    banner.className = 'fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-blue-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 cursor-pointer animate-bounce';
+                    banner.onclick = applyPendingOrders;
+                    document.body.appendChild(banner);
+                }
+                banner.innerHTML = `<i class="fa-solid fa-rotate"></i> <span class="font-bold">มีการอัปเดตข้อมูลเบื้องหลัง (คลิกเพื่อรีเฟรช)</span>`;
+                banner.classList.remove('hidden');
+            } else {
+                lastDataFingerprint = fingerprint;
+                allOrders = incoming;
+                renderOrders();
+            }
         } else {
             loading.classList.add('hidden');
             tableContainer.classList.remove('hidden');
@@ -234,7 +319,14 @@ function applyPendingOrders() {
         allOrders = pendingNewOrders;
         pendingNewOrders = [];
     }
-    lastDataFingerprint = JSON.stringify(allOrders.map(o => ({ id: o.OrderID, status: o.Status })));
+    lastDataFingerprint = JSON.stringify(allOrders.map(o => ({ 
+        id: o.OrderID, 
+        status: o.Status, 
+        items: o.Items, 
+        totalPrice: o.TotalPrice,
+        hasItemsPhoto: !!o.ItemsPhoto,
+        hasDeliveryPhoto: !!o.DeliveryPhoto 
+    })));
     renderOrders();
 }
 
@@ -306,7 +398,31 @@ async function toggleShopStatus() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', fetchShopStatus);
+document.addEventListener('DOMContentLoaded', () => {
+    fetchShopStatus();
+    
+    // ตรวจสอบสถานะการล็อกอิน (Auth Persistence)
+    if (localStorage.getItem('adminLoggedIn') === 'true' || document.cookie.includes('adminLoggedIn=true')) {
+        loginScreen.classList.add('hidden');
+        adminApp.classList.remove('hidden');
+        requestNotificationPermission();
+
+        try {
+            const cached = localStorage.getItem('adminCachedOrders');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    allOrders = parsed;
+                    allOrders.forEach(o => knownOrderIds.add(o.OrderID));
+                    renderOrders();
+                }
+            }
+        } catch(e) {}
+
+        fetchOrders(allOrders.length > 0);
+        startPolling();
+    }
+});
 
 // ============================================================
 // Notification System
@@ -382,7 +498,7 @@ function flashTabTitle(count) {
 // ============================================================
 let adminPollTimer = null;
 
-function scheduleNextAdminPoll(delayMs = 6000) {
+function scheduleNextAdminPoll(delayMs = 15000) {
     if (adminPollTimer) clearTimeout(adminPollTimer);
     if (document.hidden) return; // ไม่ดึงข้อมูลเมื่อแอดมินสลับไปแท็บอื่น
     adminPollTimer = setTimeout(() => {
@@ -392,7 +508,7 @@ function scheduleNextAdminPoll(delayMs = 6000) {
 
 function startPolling() {
     if (adminPollTimer) clearTimeout(adminPollTimer);
-    scheduleNextAdminPoll(6000);
+    scheduleNextAdminPoll(15000);
 }
 
 // เมื่อแอดมินสลับกลับมาที่แท็บ ให้ดึงข้อมูลทันที
@@ -583,7 +699,7 @@ function renderOrders() {
                                 <input type="checkbox" id="${oosId}" class="mr-1 w-3 h-3 text-red-500 rounded focus:ring-red-500" onchange="toggleOOS('${order.OrderID}', ${idx}, this)" ${isOOS}> หมด
                             </label>
                             <div id="price_div_${order.OrderID}_${idx}" class="${displayStyle} items-center">
-                                <input type="number" step="0.5" min="0" placeholder="ราคา" value="${itemPrice}" oninput="calcTotal('${order.OrderID}')" class="item-price-${order.OrderID} w-16 p-1.5 text-center text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none">
+                                <input type="number" step="0.5" min="0" placeholder="ราคา" value="${itemPrice}" id="price_${order.OrderID}_${idx}" oninput="calcTotal('${order.OrderID}')" class="item-price-${order.OrderID} w-16 p-1.5 text-center text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none">
                                 <span class="text-xs text-gray-500 ml-1 font-bold">฿</span>
                             </div>
                         </div>
@@ -912,20 +1028,25 @@ function closeUploadModal() {
 deliveryImageInput.addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (file) {
-        if (file.size > 2 * 1024 * 1024) {
-            alert('กรุณาอัปโหลดรูปภาพขนาดไม่เกิน 2MB');
+        if (file.size > 5 * 1024 * 1024) {
+            alert('กรุณาอัปโหลดรูปภาพขนาดไม่เกิน 5MB');
             this.value = '';
             removeDeliveryImage();
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function (event) {
-            deliveryBase64 = event.target.result;
+        const originalBtnText = confirmDeliveryBtn.innerHTML;
+        confirmDeliveryBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังประมวลผลรูป...';
+        confirmDeliveryBtn.disabled = true;
+
+        compressImage(file, function(dataUrl) {
+            deliveryBase64 = dataUrl;
             deliveryPreview.src = deliveryBase64;
             deliveryPreviewContainer.classList.remove('hidden');
-        };
-        reader.readAsDataURL(file);
+            
+            confirmDeliveryBtn.innerHTML = originalBtnText;
+            confirmDeliveryBtn.disabled = false;
+        });
     } else {
         removeDeliveryImage();
     }
@@ -1044,19 +1165,26 @@ function closeItemsPhotoModal() {
 document.getElementById('itemsImage').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (file) {
-        if (file.size > 2 * 1024 * 1024) {
-            alert('ขนาดไฟล์ต้องไม่เกิน 2MB');
+        if (file.size > 5 * 1024 * 1024) {
+            alert('ขนาดไฟล์ต้องไม่เกิน 5MB');
             this.value = '';
             removeItemsImage();
             return;
         }
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('itemsPreview').src = e.target.result;
+        
+        const confirmBtn = document.getElementById('confirmItemsBtn');
+        const originalText = confirmBtn.innerHTML;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังประมวลผลรูป...';
+        confirmBtn.disabled = true;
+
+        compressImage(file, function(dataUrl) {
+            document.getElementById('itemsPreview').src = dataUrl;
             document.getElementById('itemsPreviewContainer').classList.remove('hidden');
-            window.itemsPhotoBase64Data = e.target.result;
-        };
-        reader.readAsDataURL(file);
+            window.itemsPhotoBase64Data = dataUrl;
+            
+            confirmBtn.innerHTML = originalText;
+            confirmBtn.disabled = false;
+        });
     } else {
         removeItemsImage();
     }
@@ -1453,9 +1581,7 @@ async function doSavePrices(payload, btn, selectElement) {
             localStorage.setItem('adminCachedOrders', JSON.stringify(allOrders));
         } catch(e) {}
 
-        if (payload.status === 'Delivered' || payload.status === 'ยกเลิก/ของหมด') {
-            renderOrders();
-        }
+        renderOrders();
     }
 
     if (selectElement) {
@@ -1465,13 +1591,14 @@ async function doSavePrices(payload, btn, selectElement) {
         setTimeout(() => { selectElement.style.backgroundColor = ''; }, 1000);
     }
     
-    if (btn) {
-        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-        btn.classList.replace('bg-blue-500', 'bg-green-500');
+    const newBtn = document.getElementById(`saveBtn_${payload.orderId}`);
+    if (newBtn && btn) {
+        newBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        newBtn.classList.replace('bg-blue-500', 'bg-green-500');
         setTimeout(() => {
-            btn.innerHTML = btn.dataset.originalText;
-            btn.classList.replace('bg-green-500', 'bg-blue-500');
-            btn.disabled = false;
+            newBtn.innerHTML = btn.dataset.originalText;
+            newBtn.classList.replace('bg-green-500', 'bg-blue-500');
+            newBtn.disabled = false;
         }, 1500);
     }
 
@@ -1622,26 +1749,33 @@ function closePaymentModal() {
 
 document.getElementById('qrCodeInput').addEventListener('change', function(e) {
     if (e.target.files && e.target.files[0]) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('qrPreviewImg').src = e.target.result;
-            document.getElementById('qrPreview').classList.remove('hidden');
+        const file = e.target.files[0];
+        if (file.size > 5 * 1024 * 1024) {
+            alert('ขนาดไฟล์ต้องไม่เกิน 5MB');
+            this.value = '';
+            removeQrCode();
+            return;
         }
-        reader.readAsDataURL(e.target.files[0]);
+        
+        compressImage(file, function(dataUrl) {
+            document.getElementById('qrPreviewImg').src = dataUrl;
+            document.getElementById('qrPreview').classList.remove('hidden');
+            window.qrCodeBase64Data = dataUrl;
+        });
     }
 });
 
 function removeQrCode(e) {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     document.getElementById('qrCodeInput').value = '';
     document.getElementById('qrPreview').classList.add('hidden');
     document.getElementById('qrPreviewImg').src = '';
+    window.qrCodeBase64Data = null;
 }
 
 document.getElementById('paymentForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const file = document.getElementById('qrCodeInput').files[0];
-    if (!file) {
+    if (!window.qrCodeBase64Data) {
         alert('กรุณาอัปโหลดรูป QR Code');
         return;
     }
@@ -1666,36 +1800,32 @@ document.getElementById('paymentForm').addEventListener('submit', async (e) => {
         itemsStr = JSON.stringify(items);
     }
     
-    const reader = new FileReader();
-    reader.onload = async function(ev) {
-        try {
-            const payload = {
-                action: 'updateStatus',
-                orderId: paymentOrderId,
-                status: 'รอชำระเงิน',
-                totalPrice: totalPrice,
-                deliveryFee: deliveryFee,
-                itemsWithPrices: itemsStr,
-                qrCodeBase64: ev.target.result
-            };
-            
-            await fetch(SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify(payload)
-            });
-            
-            closePaymentModal();
-            showAlert('ส่งยอดสำเร็จ', 'ระบบได้แจ้งยอดให้ลูกค้าทราบแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
-            fetchOrders();
-        } catch (error) {
-            closePaymentModal();
-            fetchOrders();
-        } finally {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-        }
-    };
-    reader.readAsDataURL(file);
+    try {
+        const payload = {
+            action: 'updateStatus',
+            orderId: paymentOrderId,
+            status: 'รอชำระเงิน',
+            totalPrice: totalPrice,
+            deliveryFee: deliveryFee,
+            itemsWithPrices: itemsStr,
+            qrCodeBase64: window.qrCodeBase64Data
+        };
+        
+        await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        
+        closePaymentModal();
+        showAlert('ส่งยอดสำเร็จ', 'ระบบได้แจ้งยอดให้ลูกค้าทราบแล้ว', 'fa-check', 'text-green-600', 'bg-green-100');
+        fetchOrders();
+    } catch (error) {
+        closePaymentModal();
+        fetchOrders();
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
 });
 
 // Fullscreen Lightbox Image Viewer

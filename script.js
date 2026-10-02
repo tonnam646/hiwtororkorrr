@@ -2,6 +2,46 @@
 // คุณต้องนำ URL ของ Web App ที่ได้จาก Google Apps Script มาใส่ตรงนี้
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzLk2fmojtjc8upkQmYp-d7tbgaQVJw1moBGSpLWYiYd-MQ18WI-c8zYfRc4qI45vVQ/exec';
 
+function compressImage(file, callback) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            const max_dim = 800;
+
+            if (width > height) {
+                if (width > max_dim) {
+                    height = Math.round(height *= max_dim / width);
+                    width = max_dim;
+                }
+            } else {
+                if (height > max_dim) {
+                    width = Math.round(width *= max_dim / height);
+                    height = max_dim;
+                }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            // เติมพื้นหลังสีขาวเพื่อป้องกันพื้นหลังโปร่งใส (PNG) กลายเป็นสีดำเมื่อแปลงเป็น JPEG
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // แปลงเป็น JPEG quality 60%
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+            callback(dataUrl);
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
 let cart = [];
 const MAX_ITEMS = 7; // จำกัดรายการฝากซื้อ 7 รายการ (แถว)
 
@@ -42,20 +82,18 @@ document.addEventListener('DOMContentLoaded', () => {
 itemImageInput.addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (file) {
-        if (file.size > 2 * 1024 * 1024) {
-            showAlert('ไฟล์ใหญ่เกินไป', 'กรุณาอัปโหลดรูปภาพขนาดไม่เกิน 2MB');
+        if (file.size > 5 * 1024 * 1024) {
+            showAlert('ไฟล์ใหญ่เกินไป', 'กรุณาอัปโหลดรูปภาพขนาดไม่เกิน 5MB');
             this.value = '';
             removeImage();
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function (event) {
-            currentBase64Image = event.target.result;
+        compressImage(file, function(dataUrl) {
+            currentBase64Image = dataUrl;
             imagePreviewImg.src = currentBase64Image;
             imagePreviewContainer.classList.remove('hidden');
-        };
-        reader.readAsDataURL(file);
+        });
     } else {
         removeImage();
     }
@@ -693,13 +731,17 @@ if (slipUploadForm) {
         const file = document.getElementById('slipInput').files[0];
         if (!file || !currentTrackedOrderId) return;
         
+        if (file.size > 5 * 1024 * 1024) {
+            showAlert('ไฟล์ใหญ่เกินไป', 'กรุณาอัปโหลดรูปภาพขนาดไม่เกิน 5MB', 'fa-triangle-exclamation', 'text-red-500', 'bg-red-100');
+            return;
+        }
+        
         const btn = document.getElementById('submitSlipBtn');
         const originalText = btn.innerHTML;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังอัปโหลด...';
         btn.disabled = true;
         
-        const reader = new FileReader();
-        reader.onload = async function(ev) {
+        compressImage(file, async function(compressedBase64) {
             try {
                 const tipEl = document.getElementById('tipAmount');
                 const tip = tipEl ? (parseFloat(tipEl.value) || 0) : 0;
@@ -708,7 +750,7 @@ if (slipUploadForm) {
                     action: 'updateStatus',
                     orderId: currentTrackedOrderId,
                     status: 'รอตรวจสอบยอด',
-                    slipBase64: ev.target.result,
+                    slipBase64: compressedBase64,
                     tip: tip
                 };
                 
@@ -728,15 +770,14 @@ if (slipUploadForm) {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
-        };
-        reader.readAsDataURL(file);
+        });
     });
 }
 
 let livePollTimer = null;
 let isFetchingLiveStatus = false;
 
-function scheduleNextLivePoll(delayMs = 5000) {
+function scheduleNextLivePoll(delayMs = 20000) {
     if (livePollTimer) clearTimeout(livePollTimer);
     if (document.hidden) return; // ไม่ดึงข้อมูลเมื่อสลับไปแท็บอื่น เพื่อประหยัดเน็ตและลดโหลดเซิร์ฟเวอร์
     livePollTimer = setTimeout(() => {
@@ -746,7 +787,7 @@ function scheduleNextLivePoll(delayMs = 5000) {
 
 function startLivePolling() {
     if (livePollTimer) clearTimeout(livePollTimer);
-    scheduleNextLivePoll(5000);
+    scheduleNextLivePoll(20000);
 }
 
 // Auto-refresh immediately when user switches back to this tab
@@ -830,7 +871,7 @@ function fetchLiveStatus() {
     const timeoutId = setTimeout(() => {
         isFetchingLiveStatus = false;
         script.remove();
-        scheduleNextLivePoll(6000);
+        scheduleNextLivePoll(20000);
     }, 20000);
 
     script.onload = () => {
@@ -844,7 +885,7 @@ function fetchLiveStatus() {
         if (tbody && !tbody.children.length) {
             tbody.innerHTML = '<tr><td colspan="4" class="text-center p-6 text-red-400">ไม่สามารถเชื่อมต่อกับระบบได้</td></tr>';
         }
-        scheduleNextLivePoll(8000);
+        scheduleNextLivePoll(20000);
     };
     
     document.body.appendChild(script);
@@ -878,7 +919,7 @@ function renderLiveStatus(orders) {
     if (old) old.remove();
 
     // Schedule next poll 5 seconds AFTER current data is processed
-    scheduleNextLivePoll(5000);
+    scheduleNextLivePoll(20000);
 
     if (!orders) return;
     window.cachedLiveOrders = orders;
